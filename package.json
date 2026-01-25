@@ -1,0 +1,13 @@
+{
+  "name": "notion-health-bridge",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Workers bridge for Notion Daily_Log upsert.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^3.99.0"
+  }
+}
