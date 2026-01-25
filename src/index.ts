@@ -66,16 +66,16 @@ const buildPartialProps = (payload: Payload): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
 
   if (payload.weight !== null && payload.weight !== undefined) {
-    props["Weight (kg)"] = { number: payload.weight };
+    props["Weight"] = { number: payload.weight };
   }
   if (payload.protein !== null && payload.protein !== undefined) {
-    props["Protein (g)"] = { number: payload.protein };
+    props["Protein"] = { number: payload.protein };
   }
   if (payload.fat !== null && payload.fat !== undefined) {
-    props["Fat (g)"] = { number: payload.fat };
+    props["Fat"] = { number: payload.fat };
   }
   if (payload.carb !== null && payload.carb !== undefined) {
-    props["Carb (g)"] = { number: payload.carb };
+    props["Carb"] = { number: payload.carb };
   }
   if (payload.kcal !== null && payload.kcal !== undefined) {
     props["Kcal"] = { number: payload.kcal };
