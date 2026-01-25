@@ -136,12 +136,26 @@ export default {
       return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
     }
 
-    let payload: Payload;
-    try {
-      payload = (await request.json()) as Payload;
-    } catch (error) {
-      return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
-    }
+
+let payload: Payload;
+try {
+  payload = (await request.json()) as Payload;
+} catch (error) {
+  return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
+}
+
+// DEBUG: いま何が届いているか確認（問題が解けたら消す）
+return jsonResponse(
+  {
+    ok: false,
+    debug: {
+      content_type: request.headers.get("Content-Type"),
+      raw_date: (payload as any)?.date,
+      payload,
+    },
+  },
+  400,
+);
 
     if (!payload || typeof payload.date !== "string" || !payload.date.trim()) {
       return jsonResponse({ ok: false, error: "date is required" }, 400);
