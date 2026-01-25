@@ -140,6 +140,21 @@ export default {
 let payload: Payload;
 try {
   payload = (await request.json()) as Payload;
+// --- normalize Shortcuts payload ---
+// Shortcuts が {"": {...}} の形で送ってくる場合を吸収する
+const raw: any = payload as any;
+if (raw && typeof raw === "object" && raw[""] && typeof raw[""] === "object") {
+  payload = raw[""] as Payload;
+}
+
+// 空文字は「未入力」扱いにする（数値validationで落ちるのを防ぐ）
+const toNull = (v: any) => (v === "" ? null : v);
+(payload as any).weight = toNull((payload as any).weight);
+(payload as any).protein = toNull((payload as any).protein);
+(payload as any).fat = toNull((payload as any).fat);
+(payload as any).carb = toNull((payload as any).carb);
+(payload as any).kcal = toNull((payload as any).kcal);
+
 } catch (error) {
   return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
 }
