@@ -6,10 +6,10 @@ iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare Wor
 >
 >- Name (Title)
 >- Date (Date)
->- Weight (kg) (Number)
->- Protein (g) (Number)
->- Fat (g) (Number)
->- Carb (g) (Number)
+>- Weight (Number)
+>- Protein (Number)
+>- Fat (Number)
+>- Carb (Number)
 >- Kcal (Number)
 >- Source (Select)
 
@@ -110,7 +110,7 @@ curl -X POST "https://<worker>.workers.dev/api/health/daily" \
 - **Notion側のプロパティ名が違う**（本README冒頭の固定名を厳守）
 
 ### Notion側のプロパティ名が違うと更新できない
-- 特に `Weight (kg)` や `Protein (g)` など、**スペースや括弧まで完全一致**が必要です。
+- `Weight` や `Protein` など、**大文字小文字も含めて完全一致**が必要です。
 
 ---
 
