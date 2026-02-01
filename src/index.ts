@@ -141,27 +141,29 @@ export default {
     try {
       payload = (await request.json()) as Payload;
       // --- normalize Shortcuts payload ---
-      // Shortcuts が {"": {...}} の形で送ってくる場合を吸収する
-      const raw: any = payload as any;
-      if (raw && typeof raw === "object" && raw[""] && typeof raw[""] === "object") {
-        payload = raw[""] as Payload;
-      }
-
-      const unwrapShortcutValue = (value: any): any => {
-        if (
-          value &&
-          typeof value === "object" &&
-          !Array.isArray(value) &&
-          Object.keys(value).length === 1 &&
-          Object.prototype.hasOwnProperty.call(value, "")
+      const unwrapShortcutDeep = (value: any, maxDepth = 6): any => {
+        let current = value;
+        let depth = 0;
+        while (
+          depth < maxDepth &&
+          current &&
+          typeof current === "object" &&
+          !Array.isArray(current) &&
+          Object.prototype.hasOwnProperty.call(current, "")
         ) {
-          return (value as { "": any })[""];
+          current = (current as { "": any })[""];
+          depth += 1;
         }
-        return value;
+        return current;
       };
 
+      const raw: any = payload as any;
+      if (raw && typeof raw === "object") {
+        payload = unwrapShortcutDeep(raw) as Payload;
+      }
+
       const toNumberOrNull = (value: any): number | null => {
-        const unwrapped = unwrapShortcutValue(value);
+        const unwrapped = unwrapShortcutDeep(value);
         if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
           return null;
         }
@@ -214,8 +216,16 @@ export default {
           return [key, typeof value];
         }),
       );
+      const receivedValues = Object.fromEntries(
+        numericKeys.map((key) => [key, payload[key]]),
+      );
       return jsonResponse(
-        { ok: false, error: validationError, received_types: receivedTypes },
+        {
+          ok: false,
+          error: validationError,
+          received_types: receivedTypes,
+          received_values: receivedValues,
+        },
         400,
       );
     }
