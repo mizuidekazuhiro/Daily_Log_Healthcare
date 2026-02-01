@@ -137,27 +137,57 @@ export default {
     }
 
 
-let payload: Payload;
-try {
-  payload = (await request.json()) as Payload;
-// --- normalize Shortcuts payload ---
-// Shortcuts が {"": {...}} の形で送ってくる場合を吸収する
-const raw: any = payload as any;
-if (raw && typeof raw === "object" && raw[""] && typeof raw[""] === "object") {
-  payload = raw[""] as Payload;
-}
+    let payload: Payload;
+    try {
+      payload = (await request.json()) as Payload;
+      // --- normalize Shortcuts payload ---
+      // Shortcuts が {"": {...}} の形で送ってくる場合を吸収する
+      const raw: any = payload as any;
+      if (raw && typeof raw === "object" && raw[""] && typeof raw[""] === "object") {
+        payload = raw[""] as Payload;
+      }
 
-// 空文字は「未入力」扱いにする（数値validationで落ちるのを防ぐ）
-const toNull = (v: any) => (v === "" ? null : v);
-(payload as any).weight = toNull((payload as any).weight);
-(payload as any).protein = toNull((payload as any).protein);
-(payload as any).fat = toNull((payload as any).fat);
-(payload as any).carb = toNull((payload as any).carb);
-(payload as any).kcal = toNull((payload as any).kcal);
+      const unwrapShortcutValue = (value: any): any => {
+        if (
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 1 &&
+          Object.prototype.hasOwnProperty.call(value, "")
+        ) {
+          return (value as { "": any })[""];
+        }
+        return value;
+      };
 
-} catch (error) {
-  return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
-}
+      const toNumberOrNull = (value: any): number | null => {
+        const unwrapped = unwrapShortcutValue(value);
+        if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
+          return null;
+        }
+        if (typeof unwrapped === "number") {
+          return Number.isFinite(unwrapped) ? unwrapped : null;
+        }
+        if (typeof unwrapped === "string") {
+          const trimmed = unwrapped.trim();
+          if (!trimmed) {
+            return null;
+          }
+          const normalized = trimmed.replace(/,/g, "");
+          const parsed = Number(normalized);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      };
+
+      (payload as any).weight = toNumberOrNull((payload as any).weight);
+      (payload as any).protein = toNumberOrNull((payload as any).protein);
+      (payload as any).fat = toNumberOrNull((payload as any).fat);
+      (payload as any).carb = toNumberOrNull((payload as any).carb);
+      (payload as any).kcal = toNumberOrNull((payload as any).kcal);
+    } catch (error) {
+      return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
+    }
 
     if (!payload || typeof payload.date !== "string" || !payload.date.trim()) {
       return jsonResponse({ ok: false, error: "date is required" }, 400);
@@ -165,7 +195,29 @@ const toNull = (v: any) => (v === "" ? null : v);
 
     const validationError = validatePayload(payload);
     if (validationError) {
-      return jsonResponse({ ok: false, error: validationError }, 400);
+      const numericKeys = [
+        "weight",
+        "protein",
+        "fat",
+        "carb",
+        "kcal",
+      ] as const;
+      const receivedTypes = Object.fromEntries(
+        numericKeys.map((key) => {
+          const value = payload[key];
+          if (value === null) {
+            return [key, "null"];
+          }
+          if (Array.isArray(value)) {
+            return [key, "array"];
+          }
+          return [key, typeof value];
+        }),
+      );
+      return jsonResponse(
+        { ok: false, error: validationError, received_types: receivedTypes },
+        400,
+      );
     }
 
     const date = payload.date.trim();
