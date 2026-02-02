@@ -2,7 +2,7 @@
 
 iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare WorkersへPOSTし、WorkersがNotionのDaily_Log DBに対して `date (YYYY-MM-DD)` をキーに **Upsert**（存在すれば部分更新、なければ作成）します。
 
-さらに、**毎朝 7:00 JST** に Dropbox の特定フォルダにある「前日分の食事写真」を Notion の Daily_Log DB に自動添付します（Cron + Dropbox API）。
+さらに、**毎朝 7:00 JST** に Dropbox の特定フォルダにある「前日分の食事写真」を Notion の Daily_Log DB に自動添付します（GitHub Actions + Dropbox API）。
 
 > **注意: Notion側のプロパティ名は固定です（コード内も一致）**
 >
@@ -25,7 +25,7 @@ iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare Wor
 3. Notion DB にプロパティ追加（Meal Photos）
 4. Dropbox App を作成してアクセストークン取得
 5. Workers の環境変数を設定
-6. Cron と手動エンドポイントで動作確認
+6. GitHub Actions と手動エンドポイントで動作確認
 
 ---
 
@@ -160,10 +160,10 @@ curl -Method Post "https://<worker>.workers.dev/api/health/daily" `
 
 ---
 
-## 8. 食事写真の自動添付（新機能）
+## 8. 食事写真の自動添付（GitHub Actions 実行）
 
 ### 仕様
-- **毎朝 7:00 JST** に Cloudflare Workers の Cron で実行
+- **毎朝 7:00 JST** に GitHub Actions から Workers API を実行
 - Dropbox の指定フォルダから「前日分の食事写真」を抽出
 - Notion の Daily_Log DB の「前日の日付（Date=YYYY-MM-DD）」ページに添付
 - 添付先プロパティは **Meal Photos (Files & media)**
@@ -175,8 +175,20 @@ curl -Method Post "https://<worker>.workers.dev/api/health/daily" `
 - Dropbox の `server_modified` を **JST** に変換
 - JST日付が「前日（YYYY-MM-DD）」のファイルを対象
 
-### Cron の設定
-`wrangler.toml` の Cron 設定は以下です（JST → UTC 変換済み）:
+### GitHub Actions の設定
+Workflow ファイル: `.github/workflows/daily-log-meal-photos.yml`
+
+GitHub リポジトリの **Settings → Secrets and variables → Actions** に以下を登録:
+- `MEAL_PHOTOS_ENDPOINT`: `https://<worker>.workers.dev/api/daily-log/meal-photos/run`
+- `HEALTH_API_KEY`: Workers の `HEALTH_API_KEY` と同じ値
+
+スケジュールは JST 7:00 相当の UTC (`0 22 * * *`) で動作します。
+
+#### Cloudflare Cron Trigger を無効化する
+GitHub Actions に移行するため、Workers 側の Cron は無効化します。
+
+- `wrangler.toml` の `[triggers]` を削除済みです。
+- すでに Cloudflare Dashboard で Cron Trigger を追加している場合は、**Workers & Pages → 対象 Worker → Triggers** から Cron を削除してください。
 
 ```toml
 [triggers]
@@ -186,26 +198,9 @@ crons = ["0 22 * * *"]
 
 ---
 
-## 8.5. GitHub Actions による実行履歴・手動実行（オーケストレーション専用）
+## 8.5. GitHub Actions の手動実行
 
-GitHub Actions は **実行履歴の可視化** と **手動実行（Run workflow）** のための入口として使い、**実処理は Cloudflare Workers に任せる**構成にします。これにより、ジョブ失敗時の履歴確認や手動再実行がしやすくなり、Workers のロジックは変更せずに保守性を高められます。
-
-### 役割分担（責務分離）
-- **GitHub Actions**: スケジュール実行/手動実行のトリガーと履歴の可視化
-- **Cloudflare Workers**: Notion Upsert / Dropbox 添付などの実処理
-
-### Workflow 追加ファイル
-- `.github/workflows/daily-log-healthcare.yml`
-
-### Secrets（GitHub Actions）
-GitHub リポジトリの **Settings → Secrets and variables → Actions** に以下を登録:
-- `WORKERS_ENDPOINT`: Workers のトリガー用エンドポイント
-- `WORKERS_BEARER_TOKEN`: Bearer 認証トークン
-
-### スケジュール
-- **毎朝 7:00 JST**（UTC では `0 22 * * *`）
-
----
+Actions タブから `Daily Log Meal Photos` を選び、`Run workflow` を実行すると手動実行できます。
 
 ## 9. 手動実行（任意・推奨）
 
@@ -247,10 +242,9 @@ curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
 
 ---
 
-## 10. Cronが動いていることの確認
+## 10. GitHub Actions が動いていることの確認
 
-- Cloudflare Dashboard → **Workers & Pages** → 対象 Worker
-- **Logs** で Cron 実行ログを確認
+- GitHub の **Actions** タブでスケジュール実行ログを確認
 - もしくは手動エンドポイントで実行して結果を確認
 
 ---
@@ -297,7 +291,7 @@ curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
 - Notion Version: **2022-06-28**
 
 ### Meal Photos
-- Cron: **毎朝 7:00 JST**（`0 22 * * *` UTC）
+- GitHub Actions: **毎朝 7:00 JST**（`0 22 * * *` UTC）
 - Dropbox 共有リンク（shared link）を external file として Notion に追加
 - 重複判定キー: Dropbox `file.id`
 - 前日判定は JST 基準

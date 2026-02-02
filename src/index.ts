@@ -857,30 +857,4 @@ export default {
 
     return jsonResponse({ ok: false, error: "Not Found" }, 404);
   },
-
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(
-      (async () => {
-        try {
-          const result = await runMealPhotos(env);
-          if (!result.ok) {
-            console.error("Scheduled meal photos failed", {
-              error: result.error,
-              status: result.status,
-              date: result.date,
-            });
-          } else {
-            console.log("Scheduled meal photos completed", {
-              date: result.date,
-              added: result.added,
-              skipped: result.skipped,
-              action: result.action,
-            });
-          }
-        } catch (error) {
-          console.error("Scheduled meal photos crashed", error);
-        }
-      })(),
-    );
-  },
 };

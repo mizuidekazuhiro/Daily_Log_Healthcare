@@ -1,0 +1,32 @@
+name: Daily Log Meal Photos
+
+on:
+  schedule:
+    # 07:00 JST = 22:00 UTC (previous day)
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger-meal-photos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger meal photos run
+        env:
+          MEAL_PHOTOS_ENDPOINT: ${{ secrets.MEAL_PHOTOS_ENDPOINT }}
+          HEALTH_API_KEY: ${{ secrets.HEALTH_API_KEY }}
+        run: |
+          if [ -z "$MEAL_PHOTOS_ENDPOINT" ]; then
+            echo "MEAL_PHOTOS_ENDPOINT is not set. Add it in GitHub Secrets." >&2
+            exit 1
+          fi
+
+          if [ -z "$HEALTH_API_KEY" ]; then
+            echo "HEALTH_API_KEY is not set. Add it in GitHub Secrets." >&2
+            exit 1
+          fi
+
+          curl --fail --show-error --silent \
+            -X POST "$MEAL_PHOTOS_ENDPOINT" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $HEALTH_API_KEY" \
+            -d '{}'
