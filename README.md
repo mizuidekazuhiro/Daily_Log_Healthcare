@@ -126,10 +126,16 @@ Workers の **Settings → Variables** で以下を追加:
 
 ### 動作確認（curl）
 
+> **注意**: APIキー（`X-API-Key`）はコードやREADMEに直書きしないでください。環境変数で渡します。
+
+```bash
+export HEALTH_API_KEY="your-api-key"
+```
+
 ```bash
 curl -X POST "https://<worker>.workers.dev/api/health/daily" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <YOUR_API_KEY>" \
+  -H "X-API-Key: $HEALTH_API_KEY" \
   -d '{
     "date":"2026-01-25",
     "weight":71.2,
@@ -139,6 +145,13 @@ curl -X POST "https://<worker>.workers.dev/api/health/daily" \
     "kcal":2100,
     "source":"healthcare kit"
   }'
+```
+
+```powershell
+$env:HEALTH_API_KEY = "your-api-key"
+curl -Method Post "https://<worker>.workers.dev/api/health/daily" `
+  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
+  -Body '{ "date":"2026-01-25","weight":71.2,"protein":120,"fat":60,"carb":220,"kcal":2100,"source":"healthcare kit" }'
 ```
 
 ### 期待されるNotion側の更新
@@ -181,18 +194,34 @@ crons = ["0 22 * * *"]
 
 ### リクエスト例（前日分）
 ```bash
+export HEALTH_API_KEY="your-api-key"
 curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <YOUR_API_KEY>" \
+  -H "X-API-Key: $HEALTH_API_KEY" \
   -d '{}'
+```
+
+```powershell
+$env:HEALTH_API_KEY = "your-api-key"
+curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
+  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
+  -Body '{}'
 ```
 
 ### リクエスト例（任意の日付を指定）
 ```bash
+export HEALTH_API_KEY="your-api-key"
 curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <YOUR_API_KEY>" \
+  -H "X-API-Key: $HEALTH_API_KEY" \
   -d '{ "date": "2026-01-25" }'
+```
+
+```powershell
+$env:HEALTH_API_KEY = "your-api-key"
+curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
+  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
+  -Body '{ "date": "2026-01-25" }'
 ```
 
 ---
@@ -212,6 +241,10 @@ curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
 
 ### 404 Not Found
 - パスが `/api/health/daily` もしくは `/api/daily-log/meal-photos/run` になっていない。
+
+### 400 Notion error
+- `Source` などの Select 値が Notion 側の選択肢と一致しない
+- Date フォーマットが `YYYY-MM-DD` になっていない
 
 ### 502 Notion error
 - `DAILY_LOG_DB_ID` が誤っている
