@@ -352,7 +352,34 @@ const getDropboxSharedLink = async (
   return { ok: true, url: toDropboxRawUrl(url) };
 };
 
-const getDailyLogPage = async (
+const canSetDropboxSource = async (env: Env): Promise<boolean> => {
+  const dbResult = await notionRequest(
+    `https://api.notion.com/v1/databases/${env.DAILY_LOG_DB_ID}`,
+    { method: "GET" },
+    env.NOTION_TOKEN,
+  );
+
+  if (!dbResult.ok) {
+    console.warn("Notion database lookup failed; skipping Source select", {
+      status: dbResult.status,
+    });
+    return false;
+  }
+
+  const properties = dbResult.json.properties as
+    | Record<string, { type?: string; select?: { options?: Array<{ name?: string }> } }>
+    | undefined;
+  const sourceProp = properties?.["Source"];
+  if (sourceProp?.type !== "select") {
+    return false;
+  }
+  const options = Array.isArray(sourceProp.select?.options)
+    ? sourceProp.select?.options
+    : [];
+  return options.some((option) => option?.name === "dropbox");
+};
+
+const ensureDailyLogPageByDate = async (
   env: Env,
   date: string,
 ): Promise<
@@ -366,7 +393,7 @@ const getDailyLogPage = async (
         equals: date,
       },
     },
-    page_size: 1,
+    page_size: 2,
   };
 
   const queryResult = await notionRequest(
@@ -388,12 +415,20 @@ const getDailyLogPage = async (
   }
 
   const results = Array.isArray(queryResult.json.results)
-    ? (queryResult.json.results as Array<{ id?: string }> )
+    ? (queryResult.json.results as Array<{ id?: string }>)
     : [];
+
+  if (results.length > 1) {
+    console.warn("Multiple Daily_Log pages found for date", {
+      date,
+      count: results.length,
+    });
+  }
 
   const pageId = results[0]?.id;
 
   if (pageId) {
+    console.log("Using existing Daily_Log page for meal photos", { date });
     const pageResult = await notionRequest(
       `https://api.notion.com/v1/pages/${pageId}`,
       { method: "GET" },
@@ -423,7 +458,7 @@ const getDailyLogPage = async (
     return { ok: true, pageId, existingFiles };
   }
 
-  const createProps = {
+  const createProps: Record<string, unknown> = {
     Name: {
       title: [{ text: { content: `Daily Log | ${date}` } }],
     },
@@ -431,6 +466,10 @@ const getDailyLogPage = async (
       date: { start: date },
     },
   };
+
+  if (await canSetDropboxSource(env)) {
+    createProps["Source"] = { select: { name: "dropbox" } };
+  }
 
   const createResult = await notionRequest(
     "https://api.notion.com/v1/pages",
@@ -459,6 +498,7 @@ const getDailyLogPage = async (
     return { ok: false, error: "Notion page id missing" };
   }
 
+  console.log("Created Daily_Log page for meal photos", { date });
   return { ok: true, pageId: createdId, existingFiles: [] };
 };
 
@@ -489,7 +529,7 @@ const runMealPhotos = async (
     return { ok: true, date: targetDate, action: "no_files", added: 0, skipped: 0 };
   }
 
-  const pageResult = await getDailyLogPage(env, targetDate);
+  const pageResult = await ensureDailyLogPageByDate(env, targetDate);
   if (!pageResult.ok) {
     return pageResult;
   }
