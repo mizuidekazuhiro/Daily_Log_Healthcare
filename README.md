@@ -186,6 +186,27 @@ crons = ["0 22 * * *"]
 
 ---
 
+## 8.5. GitHub Actions による実行履歴・手動実行（オーケストレーション専用）
+
+GitHub Actions は **実行履歴の可視化** と **手動実行（Run workflow）** のための入口として使い、**実処理は Cloudflare Workers に任せる**構成にします。これにより、ジョブ失敗時の履歴確認や手動再実行がしやすくなり、Workers のロジックは変更せずに保守性を高められます。
+
+### 役割分担（責務分離）
+- **GitHub Actions**: スケジュール実行/手動実行のトリガーと履歴の可視化
+- **Cloudflare Workers**: Notion Upsert / Dropbox 添付などの実処理
+
+### Workflow 追加ファイル
+- `.github/workflows/daily-log-healthcare.yml`
+
+### Secrets（GitHub Actions）
+GitHub リポジトリの **Settings → Secrets and variables → Actions** に以下を登録:
+- `WORKERS_ENDPOINT`: Workers のトリガー用エンドポイント
+- `WORKERS_BEARER_TOKEN`: Bearer 認証トークン
+
+### スケジュール
+- **毎朝 7:00 JST**（UTC では `0 22 * * *`）
+
+---
+
 ## 9. 手動実行（任意・推奨）
 
 ### エンドポイント
