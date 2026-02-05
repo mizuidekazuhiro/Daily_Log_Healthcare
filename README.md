@@ -23,7 +23,7 @@ iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare Wor
 1. GitHubでリポジトリ作成 → ファイルを追加してコミット
 2. Cloudflare Workers にデプロイ
 3. Notion DB にプロパティ追加（Meal Photos）
-4. Dropbox App を作成してアクセストークン取得
+4. Dropbox App を作成して Refresh Token を取得
 5. Workers の環境変数を設定
 6. GitHub Actions と手動エンドポイントで動作確認
 
@@ -71,7 +71,7 @@ iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare Wor
 
 ---
 
-## 5. Dropbox側の準備（アクセストークン取得）
+## 5. Dropbox側の準備（Refresh Token 取得）
 
 1. https://www.dropbox.com/developers/apps にアクセス
 2. **Create App** → **Scoped access** を選択
@@ -81,8 +81,26 @@ iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare Wor
    - `files.metadata.read`
    - `sharing.read`
    - `sharing.write`
-6. **Settings** タブで **Generated access token** を発行
-7. 発行されたトークンを控える
+6. **Settings** タブで **App key / App secret** を控える
+7. OAuth の Authorization Code を取得して **Refresh Token** を発行する
+
+例: 以下の手順で `code` を取得し、Refresh Token を発行します。
+
+1) ブラウザで認可URLを開く（`<APP_KEY>` を置換）
+```
+https://www.dropbox.com/oauth2/authorize?client_id=<APP_KEY>&response_type=code&token_access_type=offline
+```
+
+2) 取得した `code` を使って Refresh Token を取得
+```bash
+curl -X POST https://api.dropboxapi.com/oauth2/token \
+  -d grant_type=authorization_code \
+  -d code="<CODE>" \
+  -d client_id="<APP_KEY>" \
+  -d client_secret="<APP_SECRET>"
+```
+
+レスポンスに `refresh_token` が含まれます。
 
 > App folder を使う場合は Dropbox 上でそのアプリ用フォルダが作られます。
 
@@ -95,8 +113,26 @@ Workers の **Settings → Variables** で以下を追加:
 - `NOTION_TOKEN` : Notionのインテグレーショントークン
 - `DAILY_LOG_DB_ID` : Daily_Log DB ID
 - `HEALTH_API_KEY` : APIキー（iPhoneショートカットの `X-API-Key` と一致させる）
-- `DROPBOX_ACCESS_TOKEN` : Dropboxのアクセストークン
+- `DROPBOX_APP_KEY` : Dropbox App key
+- `DROPBOX_APP_SECRET` : Dropbox App secret
+- `DROPBOX_REFRESH_TOKEN` : Dropbox Refresh Token
+- `DROPBOX_ACCESS_TOKEN` : （任意・後方互換）短命アクセストークン。設定されている場合はこれを優先
 - `DROPBOX_FOLDER_PATH` : 食事写真フォルダのパス（例: `/MealPhotos`）
+
+### 設定すべきSecrets（箇条書き）
+**Cloudflare Workers**
+- `NOTION_TOKEN`
+- `DAILY_LOG_DB_ID`
+- `HEALTH_API_KEY`
+- `DROPBOX_APP_KEY`
+- `DROPBOX_APP_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+- `DROPBOX_ACCESS_TOKEN`（任意・移行期間のみ）
+- `DROPBOX_FOLDER_PATH`
+
+**GitHub Actions**
+- `MEAL_PHOTOS_ENDPOINT`
+- `HEALTH_API_KEY`
 
 ---
 
@@ -267,7 +303,8 @@ curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
 - **Notion側のプロパティ名が違う**（本README冒頭の固定名を厳守）
 
 ### Dropbox 4xx エラー
-- `DROPBOX_ACCESS_TOKEN` が無効、期限切れ
+- `DROPBOX_ACCESS_TOKEN` が無効、期限切れ（後方互換で設定している場合）
+- `DROPBOX_APP_KEY` / `DROPBOX_APP_SECRET` / `DROPBOX_REFRESH_TOKEN` が不足・不正
 - Dropbox App のスコープが不足している
 
 ### 画像が付かない

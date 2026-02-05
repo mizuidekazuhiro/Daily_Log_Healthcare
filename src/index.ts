@@ -2,7 +2,10 @@ export interface Env {
   NOTION_TOKEN: string;
   DAILY_LOG_DB_ID: string;
   HEALTH_API_KEY: string;
-  DROPBOX_ACCESS_TOKEN: string;
+  DROPBOX_ACCESS_TOKEN?: string;
+  DROPBOX_APP_KEY?: string;
+  DROPBOX_APP_SECRET?: string;
+  DROPBOX_REFRESH_TOKEN?: string;
   DROPBOX_FOLDER_PATH: string;
 }
 
@@ -153,32 +156,157 @@ const notionRequest = async (
   return { ok: true, json: await response.json() };
 };
 
+type DropboxTokenCache = {
+  token: string;
+  fetchedAt: number;
+};
+
+let cachedDropboxAccessToken: DropboxTokenCache | null = null;
+
+const getMissingDropboxRefreshEnv = (env: Env): string[] => {
+  const missing: string[] = [];
+  if (!env.DROPBOX_APP_KEY) {
+    missing.push("DROPBOX_APP_KEY");
+  }
+  if (!env.DROPBOX_APP_SECRET) {
+    missing.push("DROPBOX_APP_SECRET");
+  }
+  if (!env.DROPBOX_REFRESH_TOKEN) {
+    missing.push("DROPBOX_REFRESH_TOKEN");
+  }
+  return missing;
+};
+
+const refreshDropboxAccessToken = async (env: Env): Promise<string> => {
+  const missing = getMissingDropboxRefreshEnv(env);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing Dropbox refresh credentials: ${missing.join(", ")}`,
+    );
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: env.DROPBOX_REFRESH_TOKEN as string,
+    client_id: env.DROPBOX_APP_KEY as string,
+    client_secret: env.DROPBOX_APP_SECRET as string,
+  });
+
+  const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    console.error("Dropbox token refresh failed", {
+      status: res.status,
+      body: text,
+    });
+    throw new Error(`Dropbox token refresh failed: ${res.status}`);
+  }
+
+  const data = JSON.parse(text) as { access_token?: string };
+  if (!data.access_token) {
+    throw new Error("Dropbox token refresh failed: missing access_token");
+  }
+  return data.access_token;
+};
+
+const getDropboxAccessToken = async (
+  env: Env,
+  options?: { forceRefresh?: boolean },
+): Promise<string> => {
+  if (!options?.forceRefresh && env.DROPBOX_ACCESS_TOKEN) {
+    return env.DROPBOX_ACCESS_TOKEN;
+  }
+  if (!options?.forceRefresh && cachedDropboxAccessToken) {
+    return cachedDropboxAccessToken.token;
+  }
+
+  const token = await refreshDropboxAccessToken(env);
+  cachedDropboxAccessToken = { token, fetchedAt: Date.now() };
+  return token;
+};
+
+const parseDropboxJson = (text: string): any | null => {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Dropbox API returned invalid JSON", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+};
+
 const dropboxRequest = async (
+  env: Env,
   endpoint: string,
   body: Record<string, unknown>,
-  token: string,
 ): Promise<
   | { ok: true; json: any }
   | { ok: false; status: number; text: string }
 > => {
-  const response = await fetch(`https://api.dropboxapi.com/2/${endpoint}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const makeRequest = async (token: string) => {
+    const response = await fetch(`https://api.dropboxapi.com/2/${endpoint}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    return { response, text };
+  };
+
+  let token = await getDropboxAccessToken(env);
+  let { response, text } = await makeRequest(token);
+
+  if (response.status === 401) {
+    console.warn("Dropbox API unauthorized", {
+      endpoint,
+      status: response.status,
+    });
+    try {
+      token = await getDropboxAccessToken(env, { forceRefresh: true });
+      const retry = await makeRequest(token);
+      response = retry.response;
+      text = retry.text;
+      if (response.status === 401) {
+        console.warn("Dropbox API unauthorized after refresh", {
+          endpoint,
+          status: response.status,
+        });
+      }
+    } catch (error) {
+      console.error("Dropbox token refresh failed after 401", {
+        endpoint,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   if (!response.ok) {
     return {
       ok: false,
       status: response.status,
-      text: await response.text(),
+      text,
     };
   }
 
-  return { ok: true, json: await response.json() };
+  const json = parseDropboxJson(text);
+  if (!json) {
+    return {
+      ok: false,
+      status: response.status,
+      text,
+    };
+  }
+
+  return { ok: true, json };
 };
 
 const jstFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -260,11 +388,7 @@ const listDropboxFiles = async (
       ? { cursor }
       : { path: env.DROPBOX_FOLDER_PATH || "", recursive: false };
 
-    const result = await dropboxRequest(
-      endpoint,
-      body,
-      env.DROPBOX_ACCESS_TOKEN,
-    );
+    const result = await dropboxRequest(env, endpoint, body);
 
     if (!result.ok) {
       return {
@@ -304,11 +428,10 @@ const getDropboxSharedLink = async (
     return { ok: false, error: "Dropbox file path missing" };
   }
 
-  const existing = await dropboxRequest(
-    "sharing/list_shared_links",
-    { path, direct_only: true },
-    env.DROPBOX_ACCESS_TOKEN,
-  );
+  const existing = await dropboxRequest(env, "sharing/list_shared_links", {
+    path,
+    direct_only: true,
+  });
 
   if (!existing.ok) {
     return {
@@ -329,9 +452,9 @@ const getDropboxSharedLink = async (
   }
 
   const created = await dropboxRequest(
+    env,
     "sharing/create_shared_link_with_settings",
     { path },
-    env.DROPBOX_ACCESS_TOKEN,
   );
 
   if (!created.ok) {
@@ -508,8 +631,29 @@ const runMealPhotos = async (
 ): Promise<MealPhotoRunResult> => {
   const targetDate = requestedDate?.trim() || getYesterdayJstDate();
 
-  if (!env.DROPBOX_ACCESS_TOKEN || !env.DROPBOX_FOLDER_PATH) {
-    return { ok: false, error: "Dropbox environment variables missing" };
+  const missingEnv: string[] = [];
+  if (!env.DROPBOX_FOLDER_PATH) {
+    missingEnv.push("DROPBOX_FOLDER_PATH");
+  }
+  if (!env.DROPBOX_ACCESS_TOKEN) {
+    missingEnv.push(...getMissingDropboxRefreshEnv(env));
+  }
+  if (missingEnv.length > 0) {
+    return {
+      ok: false,
+      error: "Dropbox environment variables missing",
+      detail: `Missing: ${missingEnv.join(", ")}`,
+    };
+  }
+
+  try {
+    await getDropboxAccessToken(env);
+  } catch (error) {
+    return {
+      ok: false,
+      error: "Dropbox token refresh failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const listResult = await listDropboxFiles(env);
