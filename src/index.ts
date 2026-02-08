@@ -53,6 +53,8 @@ type MealPhotoRunResult =
 
 const NOTION_VERSION = "2022-06-28";
 
+let currentRequestId: string | null = null;
+
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,
@@ -135,6 +137,11 @@ const notionRequest = async (
   | { ok: true; json: any }
   | { ok: false; status: number; text: string }
 > => {
+  // LOG: Notion fetch start with requestId
+  console.log("NOTION_FETCH_START", {
+    requestId: currentRequestId,
+    url,
+  });
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -145,11 +152,26 @@ const notionRequest = async (
     },
   });
 
+  // LOG: Notion fetch end with requestId and status
+  console.log("NOTION_FETCH_END", {
+    requestId: currentRequestId,
+    url,
+    status: response.status,
+    ok: response.ok,
+  });
   if (!response.ok) {
+    const text = await response.text();
+    // LOG: Notion fetch error with response body preview
+    console.error("NOTION_FETCH_ERROR", {
+      requestId: currentRequestId,
+      url,
+      status: response.status,
+      body: text.slice(0, 300),
+    });
     return {
       ok: false,
       status: response.status,
-      text: await response.text(),
+      text,
     };
   }
 
@@ -192,6 +214,11 @@ const refreshDropboxAccessToken = async (env: Env): Promise<string> => {
     client_secret: env.DROPBOX_APP_SECRET as string,
   });
 
+  // LOG: Dropbox token fetch start with requestId
+  console.log("DROPBOX_TOKEN_FETCH_START", {
+    requestId: currentRequestId,
+    url: "https://api.dropboxapi.com/oauth2/token",
+  });
   const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -199,7 +226,21 @@ const refreshDropboxAccessToken = async (env: Env): Promise<string> => {
   });
 
   const text = await res.text();
+  // LOG: Dropbox token fetch end with requestId and status
+  console.log("DROPBOX_TOKEN_FETCH_END", {
+    requestId: currentRequestId,
+    url: "https://api.dropboxapi.com/oauth2/token",
+    status: res.status,
+    ok: res.ok,
+  });
   if (!res.ok) {
+    // LOG: Dropbox token fetch error with response body preview
+    console.error("DROPBOX_TOKEN_FETCH_ERROR", {
+      requestId: currentRequestId,
+      url: "https://api.dropboxapi.com/oauth2/token",
+      status: res.status,
+      body: text.slice(0, 300),
+    });
     console.error("Dropbox token refresh failed", {
       status: res.status,
       body: text,
@@ -250,7 +291,13 @@ const dropboxRequest = async (
   | { ok: false; status: number; text: string }
 > => {
   const makeRequest = async (token: string) => {
-    const response = await fetch(`https://api.dropboxapi.com/2/${endpoint}`, {
+    const url = `https://api.dropboxapi.com/2/${endpoint}`;
+    // LOG: Dropbox fetch start with requestId
+    console.log("DROPBOX_FETCH_START", {
+      requestId: currentRequestId,
+      url,
+    });
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -259,6 +306,13 @@ const dropboxRequest = async (
       body: JSON.stringify(body),
     });
     const text = await response.text();
+    // LOG: Dropbox fetch end with requestId and status
+    console.log("DROPBOX_FETCH_END", {
+      requestId: currentRequestId,
+      url,
+      status: response.status,
+      ok: response.ok,
+    });
     return { response, text };
   };
 
@@ -290,6 +344,13 @@ const dropboxRequest = async (
   }
 
   if (!response.ok) {
+    // LOG: Dropbox fetch error with response body preview
+    console.error("DROPBOX_FETCH_ERROR", {
+      requestId: currentRequestId,
+      url: `https://api.dropboxapi.com/2/${endpoint}`,
+      status: response.status,
+      body: text.slice(0, 300),
+    });
     return {
       ok: false,
       status: response.status,
@@ -629,7 +690,14 @@ const runMealPhotos = async (
   env: Env,
   requestedDate?: string,
 ): Promise<MealPhotoRunResult> => {
+  const now = new Date();
   const targetDate = requestedDate?.trim() || getYesterdayJstDate();
+  // LOG: Date calculation with requestId
+  console.log("MEAL_PHOTOS_DATE_CALC", {
+    requestId: currentRequestId,
+    now: now.toISOString(),
+    target_date: targetDate,
+  });
 
   const missingEnv: string[] = [];
   if (!env.DROPBOX_FOLDER_PATH) {
@@ -949,41 +1017,63 @@ const handleMealPhotosRun = async (
   request: Request,
   env: Env,
 ): Promise<Response> => {
+  const requestId = crypto.randomUUID();
+  currentRequestId = requestId;
+  // LOG: Request start with requestId
+  console.log("MEAL_PHOTOS_START", {
+    requestId,
+    method: request.method,
+    path: new URL(request.url).pathname,
+    time: new Date().toISOString(),
+  });
+
   if (request.method !== "POST") {
-    return jsonResponse({ ok: false, error: "Method Not Allowed" }, 405);
+    return jsonResponse({ ok: false, error: "Method Not Allowed", requestId }, 405);
   }
 
   const apiKey = request.headers.get("X-API-Key");
   if (!apiKey || apiKey !== env.HEALTH_API_KEY) {
-    return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
+    return jsonResponse({ ok: false, error: "Unauthorized", requestId }, 401);
   }
 
   let requestedDate: string | undefined;
   try {
     if (request.headers.get("Content-Type")?.includes("application/json")) {
       const body = (await request.json()) as { date?: string };
+      // LOG: Request JSON body with requestId
+      console.log("MEAL_PHOTOS_REQUEST_BODY", {
+        requestId,
+        body,
+      });
       if (typeof body?.date === "string" && body.date.trim()) {
         requestedDate = body.date.trim();
       }
     }
   } catch (error) {
-    return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
+    return jsonResponse({ ok: false, error: "Invalid JSON", requestId }, 400);
   }
 
   try {
     const result = await runMealPhotos(env, requestedDate);
     if (!result.ok) {
       console.error("Meal photos run failed", {
+        requestId,
         error: result.error,
         status: result.status,
         date: result.date,
       });
-      return jsonResponse(result, 502);
+      return jsonResponse({ ...result, requestId }, 502);
     }
-    return jsonResponse(result, 200);
+    return jsonResponse({ ...result, requestId }, 200);
   } catch (error) {
+    // LOG: Catch block with requestId
+    console.error("MEAL_PHOTOS_CATCH", {
+      requestId,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     console.error("Meal photos run crashed", error);
-    return jsonResponse({ ok: false, error: "Internal Server Error" }, 500);
+    return jsonResponse({ ok: false, error: "Internal Server Error", requestId }, 500);
   }
 };
 
