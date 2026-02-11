@@ -1,6 +1,6 @@
 export interface Env {
   NOTION_TOKEN: string;
-  WORKERS_BEARER_TOKEN?: string;
+  HEALTH_API_KEY: string;
   SUPPLEMENTS_DB_ID?: string;
   INTAKE_LOG_DB_ID?: string;
   HEALTH_DB_ID?: string;
@@ -9,7 +9,6 @@ export interface Env {
 
   // legacy envs
   DAILY_LOG_DB_ID?: string;
-  HEALTH_API_KEY?: string;
   DROPBOX_ACCESS_TOKEN?: string;
   DROPBOX_APP_KEY?: string;
   DROPBOX_APP_SECRET?: string;

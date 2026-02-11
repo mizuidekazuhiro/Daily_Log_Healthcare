@@ -1,177 +1,133 @@
 # Daily Log Healthcare (Notion ⇄ Cloudflare Workers)
 
-iPhoneショートカットが深夜に前日分の体重・PFCをCloudflare WorkersへPOSTし、WorkersがNotionのDaily_Log DBに対して `date (YYYY-MM-DD)` をキーに **Upsert**（存在すれば部分更新、なければ作成）します。
+iPhoneショートカットやGitHub Actionsから Cloudflare Workers API を呼び、Notion の Daily Health / Supplement Intake を更新するリポジトリです。
 
-さらに、**毎朝 7:00 JST** に Dropbox の特定フォルダにある「前日分の食事写真」を Notion の Daily_Log DB に自動添付します（GitHub Actions + Dropbox API）。
-
-> **注意: Notion側のプロパティ名は固定です（コード内も一致）**
->
->- Name (Title)
->- Date (Date)
->- Weight (Number)
->- Protein (Number)
->- Fat (Number)
->- Carb (Number)
->- Kcal (Number)
->- Source (Select)
->- **Meal Photos (Files & media)** ← 追加
+- Health Daily Upsert: `POST /api/health/daily`
+- Meal Photos 連携: `POST /api/daily-log/meal-photos/run`
+- Supplements 取得: `GET /api/supplements`
+- Supplement Intake 作成: `POST /api/supplement_intakes`
 
 ---
 
 ## 1. セットアップ全体像
 
-1. GitHubでリポジトリ作成 → ファイルを追加してコミット
-2. Cloudflare Workers にデプロイ
-3. Notion DB にプロパティ追加（Meal Photos）
-4. Dropbox App を作成して Refresh Token を取得
-5. Workers の環境変数を設定
-6. GitHub Actions と手動エンドポイントで動作確認
+1. Notion DB を準備（Daily Health / Supplements / Supplement Intake Log）
+2. Cloudflare Workers に `wrangler deploy` でデプロイ
+3. Workers Runtime Secrets を `wrangler secret put` で投入
+4. iPhoneショートカット / GitHub Actions から API 呼び出し
 
 ---
 
-## 2. GitHubで新規レポ作成 → ブラウザ編集でコミット
+## 2. Secrets / Vars の配置方針（結論先出し）
 
-1. GitHubで **新規リポジトリ**を作成（空の状態でOK）。
-2. このリポジトリに以下のファイルを**ブラウザ編集だけで**追加/作成してコミット。
-   - `package.json`
-   - `wrangler.toml`
-   - `src/index.ts`
-   - `README.md`
-   - `.gitignore`
+### A. どこに何を置くか
 
-> ローカル環境は不要です。GitHubのブラウザ編集のみで完結します。
+- **Cloudflare Workers Runtime で参照する値は Cloudflare 側に置く**
+  - `NOTION_TOKEN`, `HEALTH_API_KEY`, 各 DB ID は Workers の Secrets
+- **GitHub Actions には原則「実行基盤の認証」だけを置く**
+  - 例: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+- `NOTION_TOKEN` や `HEALTH_API_KEY` を GitHub Secrets に複製する方式は、
+  - 漏洩面のリスク増
+  - 値の二重管理による運用ミス
+  につながるため、**デプロイ用途では非推奨**
 
----
+> 例外: このリポジトリの `daily-log-meal-photos` workflow は「APIクライアント」として Workers を叩くため、`HEALTH_API_KEY` を GitHub Secrets に持たせる運用も可能です（最小権限・ローテーション推奨）。
 
-## 3. Cloudflare Dashboard → Workers & Pages → Connect to Git
+### B. 具体的な設定先（このリポジトリ向け）
 
-1. Cloudflare Dashboard → **Workers & Pages** → **Create** → **Workers**
-2. **Connect to Git** を選択
-3. 対象リポジトリを選択
+| 区分 | 置く場所 | キー |
+|---|---|---|
+| Deploy 実行用 | GitHub Secrets（Actions） | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`（必要に応じ `CLOUDFLARE_PROJECT_NAME`） |
+| Meal Photos 呼び出し用 | GitHub Secrets（Actions） | `MEAL_PHOTOS_ENDPOINT`, `HEALTH_API_KEY` |
+| Runtime 機密情報 | Cloudflare Workers Secrets | `NOTION_TOKEN`, `HEALTH_API_KEY`, `SUPPLEMENTS_DB_ID`, `INTAKE_LOG_DB_ID`, `HEALTH_DB_ID` |
+| Runtime 非機密設定 | `wrangler.toml` の `vars` | `HEALTH_DATE_PROP`, `HEALTH_TITLE_PROP` |
 
-### デプロイ設定
-- **Build/Deploy command**: `npx wrangler deploy`（最短・確実）
-  - もしくは `npm run deploy` でも可
+### C. 「デプロイで値が消える」事故を防ぐ運用（最重要）
 
-> **CLI で直接デプロイしたい場合**
-> ```bash
-> npx wrangler deploy
-> ```
+原因例:
+- ダッシュボード手入力と CI/CD の設定がずれる
+- 別環境へのデプロイで想定外の値になる
 
----
+対策（Source of Truth を wrangler に統一）:
+1. **Secrets は `wrangler secret put` で投入する**
+2. **Vars は `wrangler.toml` で管理する**
+3. ダッシュボード手入力を常用しない（緊急時のみ）
 
-## 4. Notion側の準備（Meal Photos プロパティを追加）
+### Secrets 初期投入コマンド
 
-1. Notionで対象の **Daily_Log** データベースを開く
-2. 右端の「＋」でプロパティを追加
-3. 名前を **Meal Photos** に設定
-4. タイプを **Files & media** に設定
-
-> **注意**: プロパティ名は大文字小文字含めて完全一致が必要です。
-
----
-
-## 5. Dropbox側の準備（Refresh Token 取得）
-
-1. https://www.dropbox.com/developers/apps にアクセス
-2. **Create App** → **Scoped access** を選択
-3. Access type は **Full Dropbox** もしくは **App folder** を選択
-4. App 名を入力して作成
-5. **Permissions** タブで以下を有効化
-   - `files.metadata.read`
-   - `sharing.read`
-   - `sharing.write`
-6. **Settings** タブで **App key / App secret** を控える
-7. OAuth の Authorization Code を取得して **Refresh Token** を発行する
-
-例: 以下の手順で `code` を取得し、Refresh Token を発行します。
-
-1) ブラウザで認可URLを開く（`<APP_KEY>` を置換）
-```
-https://www.dropbox.com/oauth2/authorize?client_id=<APP_KEY>&response_type=code&token_access_type=offline
-```
-
-2) 取得した `code` を使って Refresh Token を取得
 ```bash
-curl -X POST https://api.dropboxapi.com/oauth2/token \
-  -d grant_type=authorization_code \
-  -d code="<CODE>" \
-  -d client_id="<APP_KEY>" \
-  -d client_secret="<APP_SECRET>"
+wrangler secret put NOTION_TOKEN
+wrangler secret put HEALTH_API_KEY
+wrangler secret put SUPPLEMENTS_DB_ID
+wrangler secret put INTAKE_LOG_DB_ID
+wrangler secret put HEALTH_DB_ID
 ```
 
-レスポンスに `refresh_token` が含まれます。
+環境分離する場合（例: production）:
 
-> App folder を使う場合は Dropbox 上でそのアプリ用フォルダが作られます。
+```bash
+wrangler secret put NOTION_TOKEN --env production
+wrangler secret put HEALTH_API_KEY --env production
+wrangler secret put SUPPLEMENTS_DB_ID --env production
+wrangler secret put INTAKE_LOG_DB_ID --env production
+wrangler secret put HEALTH_DB_ID --env production
+```
 
 ---
 
-## 6. Cloudflare側で環境変数を設定
+## 3. デプロイ
 
-Workers の **Settings → Variables** で以下を追加:
+- `wrangler.toml` はこのリポジトリに同梱済み
+- デプロイ:
 
-- `NOTION_TOKEN` : Notionのインテグレーショントークン
-- `DAILY_LOG_DB_ID` : Daily_Log DB ID
-- `HEALTH_API_KEY` : APIキー（iPhoneショートカットの `X-API-Key` と一致させる）
-- `DROPBOX_APP_KEY` : Dropbox App key
-- `DROPBOX_APP_SECRET` : Dropbox App secret
-- `DROPBOX_REFRESH_TOKEN` : Dropbox Refresh Token
-- `DROPBOX_ACCESS_TOKEN` : （任意・後方互換）短命アクセストークン。設定されている場合はこれを優先
-- `DROPBOX_FOLDER_PATH` : 食事写真フォルダのパス（例: `/MealPhotos`）
+```bash
+npm run deploy
+```
 
-### 設定すべきSecrets（箇条書き）
-**Cloudflare Workers**
+内部では `wrangler deploy` を実行します。
+
+---
+
+## 4. Cloudflare Workers 環境変数
+
+### Secrets（機密）
+
 - `NOTION_TOKEN`
-- `DAILY_LOG_DB_ID`
 - `HEALTH_API_KEY`
-- `DROPBOX_APP_KEY`
-- `DROPBOX_APP_SECRET`
-- `DROPBOX_REFRESH_TOKEN`
-- `DROPBOX_ACCESS_TOKEN`（任意・移行期間のみ）
-- `DROPBOX_FOLDER_PATH`
+- `SUPPLEMENTS_DB_ID`
+- `INTAKE_LOG_DB_ID`
+- `HEALTH_DB_ID`
 
-**GitHub Actions**
-- `MEAL_PHOTOS_ENDPOINT`
-- `HEALTH_API_KEY`
+### Vars（非機密）
+
+- `HEALTH_DATE_PROP`（省略時デフォルト: `Date`）
+- `HEALTH_TITLE_PROP`（省略時デフォルト: `Name`）
 
 ---
 
-## 7. 既存の Health Upsert API
+## 5. 認証仕様（統一）
 
-### エンドポイント
-- **POST** `https://<worker>.workers.dev/api/health/daily`
-- **認証**: `X-API-Key` ヘッダー必須
+このリポジトリのヘルス系 API はすべて以下で認証します。
 
-### JSON payload 例
-```json
-{
-  "date": "2026-01-25",
-  "weight": 71.2,
-  "protein": 120,
-  "fat": 60,
-  "carb": 220,
-  "kcal": 2100,
-  "source": "healthcare kit"
-}
-```
+- Header: `Authorization: Bearer <HEALTH_API_KEY>`
+- 検証: `token === env.HEALTH_API_KEY`
+- 不一致時: `401 Unauthorized`
 
-- `date` は必須。
-- **payloadで送られてきたキーだけ**を更新（`null/undefined` は上書きしません）。
-- 数値は **number & finite** のみ受け付けます。
-- `source` は空文字なら更新しません。
+---
 
-### 動作確認（curl）
+## 6. API 仕様
 
-> **注意**: APIキー（`X-API-Key`）はコードやREADMEに直書きしないでください。環境変数で渡します。
+### POST `/api/health/daily`
+
+- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
+- 必須: `date` (`YYYY-MM-DD`)
+- 送信されたキーのみ更新（`null/undefined` は上書きしない）
 
 ```bash
 export HEALTH_API_KEY="your-api-key"
-```
-
-```bash
 curl -X POST "https://<worker>.workers.dev/api/health/daily" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $HEALTH_API_KEY" \
+  -H "Authorization: Bearer $HEALTH_API_KEY" \
   -d '{
     "date":"2026-01-25",
     "weight":71.2,
@@ -183,265 +139,35 @@ curl -X POST "https://<worker>.workers.dev/api/health/daily" \
   }'
 ```
 
-```powershell
-$env:HEALTH_API_KEY = "your-api-key"
-curl -Method Post "https://<worker>.workers.dev/api/health/daily" `
-  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
-  -Body '{ "date":"2026-01-25","weight":71.2,"protein":120,"fat":60,"carb":220,"kcal":2100,"source":"healthcare kit" }'
-```
+### POST `/api/daily-log/meal-photos/run`
 
-### 期待されるNotion側の更新
-- **Date** が `2026-01-25` のページがあれば、そのページの指定プロパティのみ更新
-- 無ければ新規作成（`Name` は `Daily Log | 2026-01-25`）
+- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
+- body は `{}` でも実行可能
 
----
-
-## 8. 食事写真の自動添付（GitHub Actions 実行）
-
-### 仕様
-- **毎朝 7:00 JST** に GitHub Actions から Workers API を実行
-- Dropbox の指定フォルダから「前日分の食事写真」を抽出
-- Notion の Daily_Log DB の「前日の日付（Date=YYYY-MM-DD）」ページに添付
-- 添付先プロパティは **Meal Photos (Files & media)**
-- Dropbox は **共有リンク（shared link）** を利用（なければ作成）
-- Notion には **external file** として登録
-- **同一 Dropbox file.id は重複添付しない**
-
-### Dropboxフォルダ内の「前日分」の定義
-- Dropbox の `server_modified` を **JST** に変換
-- JST日付が「前日（YYYY-MM-DD）」のファイルを対象
-
-### GitHub Actions の設定
-Workflow ファイル: `.github/workflows/daily-log-meal-photos.yml`
-
-GitHub リポジトリの **Settings → Secrets and variables → Actions** に以下を登録:
-- `MEAL_PHOTOS_ENDPOINT`: `https://<worker>.workers.dev/api/daily-log/meal-photos/run`
-- `HEALTH_API_KEY`: Workers の `HEALTH_API_KEY` と同じ値
-
-スケジュールは JST 7:00 相当の UTC (`0 22 * * *`) で動作します。
-
-#### Cloudflare Cron Trigger を無効化する
-GitHub Actions に移行するため、Workers 側の Cron は無効化します。
-
-- `wrangler.toml` の `[triggers]` を削除済みです。
-- すでに Cloudflare Dashboard で Cron Trigger を追加している場合は、**Workers & Pages → 対象 Worker → Triggers** から Cron を削除してください。
-
-```toml
-[triggers]
-# 07:00 JST = 22:00 UTC (previous day)
-crons = ["0 22 * * *"]
-```
-
----
-
-## 8.5. GitHub Actions の手動実行
-
-Actions タブから `Daily Log Meal Photos` を選び、`Run workflow` を実行すると手動実行できます。
-
-## 9. 手動実行（任意・推奨）
-
-### エンドポイント
-- **POST** `https://<worker>.workers.dev/api/daily-log/meal-photos/run`
-- **認証**: `X-API-Key` ヘッダー必須
-
-### リクエスト例（前日分）
 ```bash
-export HEALTH_API_KEY="your-api-key"
 curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $HEALTH_API_KEY" \
+  -H "Authorization: Bearer $HEALTH_API_KEY" \
   -d '{}'
 ```
 
-```powershell
-$env:HEALTH_API_KEY = "your-api-key"
-curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
-  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
-  -Body '{}'
-```
+### GET `/api/supplements`
 
-### リクエスト例（任意の日付を指定）
-```bash
-export HEALTH_API_KEY="your-api-key"
-curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $HEALTH_API_KEY" \
-  -d '{ "date": "2026-01-25" }'
-```
-
-```powershell
-$env:HEALTH_API_KEY = "your-api-key"
-curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
-  -Headers @{ "Content-Type" = "application/json"; "X-API-Key" = $env:HEALTH_API_KEY } `
-  -Body '{ "date": "2026-01-25" }'
-```
-
----
-
-## 10. GitHub Actions が動いていることの確認
-
-- GitHub の **Actions** タブでスケジュール実行ログを確認
-- もしくは手動エンドポイントで実行して結果を確認
-
----
-
-## 11. ありがちなエラーと対処
-
-### 401 Unauthorized
-- `X-API-Key` が Workers env の `HEALTH_API_KEY` と一致しない。
-
-### 404 Not Found
-- パスが `/api/health/daily` もしくは `/api/daily-log/meal-photos/run` になっていない。
-
-### 400 Notion error
-- `Source` などの Select 値が Notion 側の選択肢と一致しない
-- Date フォーマットが `YYYY-MM-DD` になっていない
-
-### 502 Notion error
-- `DAILY_LOG_DB_ID` が誤っている
-- NotionのインテグレーションにDB共有がされていない
-- **Notion側のプロパティ名が違う**（本README冒頭の固定名を厳守）
-
-### Dropbox 4xx エラー
-- `DROPBOX_ACCESS_TOKEN` が無効、期限切れ（後方互換で設定している場合）
-- `DROPBOX_APP_KEY` / `DROPBOX_APP_SECRET` / `DROPBOX_REFRESH_TOKEN` が不足・不正
-- Dropbox App のスコープが不足している
-
-### 画像が付かない
-- `DROPBOX_FOLDER_PATH` が正しく設定されているか確認
-- 対象ファイルの `server_modified` が **JSTで前日** になっているか確認
-- 対象ファイルの拡張子が画像形式（.jpg/.png/.heic など）か確認
-
-### 重複して添付される
-- `Meal Photos` のファイル名に Dropbox `file.id` が含まれているか確認
-- 既に含まれている場合はスキップされます
-
----
-
-## 仕様まとめ
-
-### Health Upsert
-- エンドポイント: **POST /api/health/daily**
-- 認証: **X-API-Key**
-- date を唯一キーとして Upsert
-- payloadのキーだけ更新（null/undefinedは上書きしない）
-- Notion Version: **2022-06-28**
-
-### Meal Photos
-- GitHub Actions: **毎朝 7:00 JST**（`0 22 * * *` UTC）
-- Dropbox 共有リンク（shared link）を external file として Notion に追加
-- 重複判定キー: Dropbox `file.id`
-- 前日判定は JST 基準
-
----
-
-## サプリ摂取ログ機能（Workers API方式）
-
-### Notion DB設定
-
-#### 1) Supplements DB（サプリ一覧）
-- 必須: `Name` (title)
-- 推奨: `Active` (checkbox) ※ `true` のみショートカットで表示
-
-#### 2) Supplement Intake Log DB（摂取ログ）
-- 必須: `Name` (title)
-- 必須: `TakenAt` (date)
-- 必須: `Supplement` (relation → Supplements DB)
-- 必須: `Daily Health` (relation → Daily Health DB)
-- 任意: `Source` (select: `shortcut` / `manual` など)
-
-#### 3) Daily Health DB（既存）
-- 必須: `Date` (date, `YYYY-MM-DD`)
-- 推奨: `Name` (title)
-
-### Workers 環境変数/Secrets
-- `NOTION_TOKEN`（既存）
-- `WORKERS_BEARER_TOKEN`（新規）
-- `SUPPLEMENTS_DB_ID`（新規）
-- `INTAKE_LOG_DB_ID`（新規）
-- `HEALTH_DB_ID`（既存運用DB。未設定時は `DAILY_LOG_DB_ID` を利用）
-- `HEALTH_DATE_PROP`（任意, default: `Date`）
-- `HEALTH_TITLE_PROP`（任意, default: `Name`）
-
-### API仕様
-
-#### GET `/api/supplements`
-- 認証: `Authorization: Bearer <WORKERS_BEARER_TOKEN>`
-- 返却:
-```json
-{
-  "choices": [
-    {"label": "Vitamin C", "value": "<notion_page_id>"}
-  ]
-}
-```
-- `Active` プロパティが存在し、かつ true のページを優先して返却（該当0件時は全件返却）
-
-#### POST `/api/supplement_intakes`
-- 認証: `Authorization: Bearer <WORKERS_BEARER_TOKEN>`
-- リクエスト:
-```json
-{
-  "taken_at": "2026-02-11T08:15:00+09:00",
-  "supplement_ids": ["<page_id_1>", "<page_id_2>"],
-  "source": "shortcut"
-}
-```
-- レスポンス:
-```json
-{
-  "daily_health_page_id": "<page_id>",
-  "created": [
-    {"supplement_id": "<page_id_1>", "intake_page_id": "<intake_page_id>"}
-  ],
-  "skipped": [
-    {"supplement_id": "<page_id_2>", "reason": "duplicate"}
-  ]
-}
-```
-- 重複判定キー: `JST日付 + taken_at(分) + supplement_id`
-- Intake Log の title 規則: `YYYY-MM-DD HH:MM - supplement_name`
-
-### iPhoneショートカット設定
-
-#### ショートカット1: 「サプリ一覧取得」
-1. `URL` アクションで `GET /api/supplements` のURLを指定
-2. `URLの内容を取得`:
-   - Method: `GET`
-   - Headers: `Authorization: Bearer <token>`
-3. `辞書から値を取得` で `choices` を取り出す
-4. `リストから選択`:
-   - 複数選択 ON
-   - 表示: `label`
-   - 値: `value`（Notion page_id）
-
-#### ショートカット2: 「サプリ摂取を記録」
-1. `現在の日付` を取得（または入力で日時指定）
-2. `日付をフォーマット` で `yyyy-MM-dd'T'HH:mm:ssZZZZZ`（`+09:00`）形式の `taken_at` を作成
-3. ショートカット1で得た `supplement_ids` 配列を組み立て
-4. `URL` アクションで `POST /api/supplement_intakes`
-5. `URLの内容を取得`:
-   - Method: `POST`
-   - Headers: `Authorization: Bearer <token>`, `Content-Type: application/json`
-   - Body(JSON): `taken_at`, `supplement_ids`, `source`
-6. `created` / `skipped` を通知表示（任意）
-
-> セキュリティ注意: Authorizationトークンはショートカットへ直書きする場合、共有時に漏洩しないよう注意してください。
-
-### 動作確認（curl）
-
-```bash
-export WORKERS_BEARER_TOKEN="your-token"
-```
+- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
+- `Active=true` がある場合は優先返却
 
 ```bash
 curl -X GET "https://<worker>.workers.dev/api/supplements" \
-  -H "Authorization: Bearer $WORKERS_BEARER_TOKEN"
+  -H "Authorization: Bearer $HEALTH_API_KEY"
 ```
+
+### POST `/api/supplement_intakes`
+
+- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
 
 ```bash
 curl -X POST "https://<worker>.workers.dev/api/supplement_intakes" \
-  -H "Authorization: Bearer $WORKERS_BEARER_TOKEN" \
+  -H "Authorization: Bearer $HEALTH_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "taken_at":"2026-02-11T08:15:00+09:00",
@@ -450,6 +176,53 @@ curl -X POST "https://<worker>.workers.dev/api/supplement_intakes" \
   }'
 ```
 
-Notion上で以下を確認:
-- Supplement Intake Log DB に 1摂取=1レコード作成
-- Daily Health DB 当日ページへの relation が設定される
+---
+
+## 7. iPhoneショートカット設定
+
+### サプリ一覧取得
+
+- `GET /api/supplements`
+- Header: `Authorization: Bearer <HEALTH_API_KEY>`
+
+### サプリ摂取記録
+
+- `POST /api/supplement_intakes`
+- Header:
+  - `Authorization: Bearer <HEALTH_API_KEY>`
+  - `Content-Type: application/json`
+- Body: `taken_at`, `supplement_ids`, `source`
+
+> セキュリティ注意: `HEALTH_API_KEY` はショートカット内で利用するため、ショートカット共有時の漏洩に注意してください（共有前にキー削除・再設定推奨）。
+
+---
+
+## 8. GitHub Actions（Meal Photos 実行）
+
+Workflow: `.github/workflows/daily-log-meal-photos.yml`
+
+必要な GitHub Secrets:
+- `MEAL_PHOTOS_ENDPOINT`
+- `HEALTH_API_KEY`
+
+この workflow は Workers API を定期実行する「クライアント用途」です。Deploy 用 Secrets（Cloudflare API Token 等）とは用途が異なります。
+
+---
+
+## 9. Notion DB 要件（サプリ機能）
+
+### Supplements DB
+- `Name` (title)
+- `Active` (checkbox, 推奨)
+
+### Supplement Intake Log DB
+- `Name` (title)
+- `TakenAt` (date)
+- `Supplement` (relation)
+- `Daily Health` (relation)
+- `Source` (select, 任意)
+
+### Daily Health DB
+- `Date` (date)
+- `Name` (title)
+
