@@ -28,6 +28,6 @@ jobs:
           curl -i \
             -X POST "$MEAL_PHOTOS_ENDPOINT" \
             -H "Content-Type: application/json" \
-            -H "X-API-Key: $HEALTH_API_KEY" \
+            -H "Authorization: Bearer $HEALTH_API_KEY" \
             -d '{}'
 

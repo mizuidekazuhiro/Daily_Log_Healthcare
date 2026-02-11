@@ -1,7 +1,7 @@
-import type { Env } from "../types";
+type AuthEnv = { HEALTH_API_KEY?: string };
 
-export const requireBearerAuth = (request: Request, env: Env): boolean => {
-  const expected = env.WORKERS_BEARER_TOKEN;
+export const requireBearerAuth = (request: Request, env: AuthEnv): boolean => {
+  const expected = env.HEALTH_API_KEY;
   if (!expected) {
     return false;
   }

@@ -1,3 +1,5 @@
+import { requireBearerAuth } from "./utils/auth";
+
 export interface Env {
   NOTION_TOKEN: string;
   DAILY_LOG_DB_ID: string;
@@ -819,8 +821,7 @@ const handleHealthDaily = async (
     return jsonResponse({ ok: false, error: "Method Not Allowed" }, 405);
   }
 
-  const apiKey = request.headers.get("X-API-Key");
-  if (!apiKey || apiKey !== env.HEALTH_API_KEY) {
+  if (!requireBearerAuth(request, env)) {
     return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
   }
 
@@ -1031,8 +1032,7 @@ const handleMealPhotosRun = async (
     return jsonResponse({ ok: false, error: "Method Not Allowed", requestId }, 405);
   }
 
-  const apiKey = request.headers.get("X-API-Key");
-  if (!apiKey || apiKey !== env.HEALTH_API_KEY) {
+  if (!requireBearerAuth(request, env)) {
     return jsonResponse({ ok: false, error: "Unauthorized", requestId }, 401);
   }
 

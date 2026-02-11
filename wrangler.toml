@@ -1,3 +1,11 @@
 name = "daily-log-healthcare"
 main = "src/index.ts"
 compatibility_date = "2025-12-01"
+
+[vars]
+HEALTH_DATE_PROP = "Date"
+HEALTH_TITLE_PROP = "Name"
+
+[env.production.vars]
+HEALTH_DATE_PROP = "Date"
+HEALTH_TITLE_PROP = "Name"
