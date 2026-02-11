@@ -332,3 +332,124 @@ curl -Method Post "https://<worker>.workers.dev/api/daily-log/meal-photos/run" `
 - Dropbox 共有リンク（shared link）を external file として Notion に追加
 - 重複判定キー: Dropbox `file.id`
 - 前日判定は JST 基準
+
+---
+
+## サプリ摂取ログ機能（Workers API方式）
+
+### Notion DB設定
+
+#### 1) Supplements DB（サプリ一覧）
+- 必須: `Name` (title)
+- 推奨: `Active` (checkbox) ※ `true` のみショートカットで表示
+
+#### 2) Supplement Intake Log DB（摂取ログ）
+- 必須: `Name` (title)
+- 必須: `TakenAt` (date)
+- 必須: `Supplement` (relation → Supplements DB)
+- 必須: `Daily Health` (relation → Daily Health DB)
+- 任意: `Source` (select: `shortcut` / `manual` など)
+
+#### 3) Daily Health DB（既存）
+- 必須: `Date` (date, `YYYY-MM-DD`)
+- 推奨: `Name` (title)
+
+### Workers 環境変数/Secrets
+- `NOTION_TOKEN`（既存）
+- `WORKERS_BEARER_TOKEN`（新規）
+- `SUPPLEMENTS_DB_ID`（新規）
+- `INTAKE_LOG_DB_ID`（新規）
+- `HEALTH_DB_ID`（既存運用DB。未設定時は `DAILY_LOG_DB_ID` を利用）
+- `HEALTH_DATE_PROP`（任意, default: `Date`）
+- `HEALTH_TITLE_PROP`（任意, default: `Name`）
+
+### API仕様
+
+#### GET `/api/supplements`
+- 認証: `Authorization: Bearer <WORKERS_BEARER_TOKEN>`
+- 返却:
+```json
+{
+  "choices": [
+    {"label": "Vitamin C", "value": "<notion_page_id>"}
+  ]
+}
+```
+- `Active` プロパティが存在し、かつ true のページを優先して返却（該当0件時は全件返却）
+
+#### POST `/api/supplement_intakes`
+- 認証: `Authorization: Bearer <WORKERS_BEARER_TOKEN>`
+- リクエスト:
+```json
+{
+  "taken_at": "2026-02-11T08:15:00+09:00",
+  "supplement_ids": ["<page_id_1>", "<page_id_2>"],
+  "source": "shortcut"
+}
+```
+- レスポンス:
+```json
+{
+  "daily_health_page_id": "<page_id>",
+  "created": [
+    {"supplement_id": "<page_id_1>", "intake_page_id": "<intake_page_id>"}
+  ],
+  "skipped": [
+    {"supplement_id": "<page_id_2>", "reason": "duplicate"}
+  ]
+}
+```
+- 重複判定キー: `JST日付 + taken_at(分) + supplement_id`
+- Intake Log の title 規則: `YYYY-MM-DD HH:MM - supplement_name`
+
+### iPhoneショートカット設定
+
+#### ショートカット1: 「サプリ一覧取得」
+1. `URL` アクションで `GET /api/supplements` のURLを指定
+2. `URLの内容を取得`:
+   - Method: `GET`
+   - Headers: `Authorization: Bearer <token>`
+3. `辞書から値を取得` で `choices` を取り出す
+4. `リストから選択`:
+   - 複数選択 ON
+   - 表示: `label`
+   - 値: `value`（Notion page_id）
+
+#### ショートカット2: 「サプリ摂取を記録」
+1. `現在の日付` を取得（または入力で日時指定）
+2. `日付をフォーマット` で `yyyy-MM-dd'T'HH:mm:ssZZZZZ`（`+09:00`）形式の `taken_at` を作成
+3. ショートカット1で得た `supplement_ids` 配列を組み立て
+4. `URL` アクションで `POST /api/supplement_intakes`
+5. `URLの内容を取得`:
+   - Method: `POST`
+   - Headers: `Authorization: Bearer <token>`, `Content-Type: application/json`
+   - Body(JSON): `taken_at`, `supplement_ids`, `source`
+6. `created` / `skipped` を通知表示（任意）
+
+> セキュリティ注意: Authorizationトークンはショートカットへ直書きする場合、共有時に漏洩しないよう注意してください。
+
+### 動作確認（curl）
+
+```bash
+export WORKERS_BEARER_TOKEN="your-token"
+```
+
+```bash
+curl -X GET "https://<worker>.workers.dev/api/supplements" \
+  -H "Authorization: Bearer $WORKERS_BEARER_TOKEN"
+```
+
+```bash
+curl -X POST "https://<worker>.workers.dev/api/supplement_intakes" \
+  -H "Authorization: Bearer $WORKERS_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "taken_at":"2026-02-11T08:15:00+09:00",
+    "supplement_ids":["<supplement_page_id_1>","<supplement_page_id_2>"],
+    "source":"shortcut"
+  }'
+```
+
+Notion上で以下を確認:
+- Supplement Intake Log DB に 1摂取=1レコード作成
+- Daily Health DB 当日ページへの relation が設定される
