@@ -109,8 +109,11 @@ npm run deploy
 
 このリポジトリのヘルス系 API はすべて以下で認証します。
 
-- Header: `Authorization: Bearer <HEALTH_API_KEY>`
-- 検証: `token === env.HEALTH_API_KEY`
+- 推奨 Header: `Authorization: Bearer <HEALTH_API_KEY>`
+- 互換 Header（ショートカット対策）:
+  - `Authorization: <HEALTH_API_KEY>`
+  - `X-API-Key: <HEALTH_API_KEY>`
+- 検証: 抽出したトークンが `env.HEALTH_API_KEY` と一致
 - 不一致時: `401 Unauthorized`
 
 ---
@@ -225,4 +228,3 @@ Workflow: `.github/workflows/daily-log-meal-photos.yml`
 ### Daily Health DB
 - `Date` (date)
 - `Name` (title)
-
