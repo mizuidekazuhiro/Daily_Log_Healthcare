@@ -7,6 +7,21 @@ import { getNotionErrorDetails, NotionApiError } from "../services/notion_client
 
 const isIsoDate = (value: string): boolean => !Number.isNaN(new Date(value).getTime());
 
+const normalizeSupplementIds = (input: unknown): string[] => {
+  if (Array.isArray(input)) {
+    return input
+      .map((v) => (typeof v === "string" ? v.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof input === "string") {
+    return input
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
 const validateRequest = (body: PostIntakesRequest): string | null => {
   if (!body || typeof body !== "object") return "body must be an object";
   if (typeof body.taken_at !== "string" || !isIsoDate(body.taken_at)) return "taken_at must be ISO8601 string";
@@ -21,7 +36,13 @@ export const handleSupplementIntakesPost = async (
   env: Env,
 ): Promise<Response> => {
   try {
-    const body = await readJson<PostIntakesRequest>(request);
+    const rawBody = await readJson<any>(request);
+
+    // ★ ここで正規化（改行文字列でもOKにする）
+    rawBody.supplement_ids = normalizeSupplementIds(rawBody.supplement_ids);
+
+    const body = rawBody as PostIntakesRequest;
+
     const error = validateRequest(body);
     if (error) return badRequest(error);
 
