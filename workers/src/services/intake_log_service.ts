@@ -34,7 +34,6 @@ const hasDuplicate = async (
 
 export const createIntakeLogs = async (
   env: Env,
-  dailyHealthPageId: string,
   takenAtIso: string,
   supplementIds: string[],
   source?: string,
@@ -61,13 +60,16 @@ export const createIntakeLogs = async (
     const properties: Record<string, unknown> = {
       Name: { title: [{ text: { content: title } }] },
       TakenAt: { date: { start: takenAtIso } },
-      Supplement: { relation: [{ id: supplementId }] },
-      "Daily Health": { relation: [{ id: dailyHealthPageId }] },
     };
 
     if (source) {
       properties.Source = { select: { name: source } };
     }
+
+    console.log("SUPPLEMENT_INTAKE_CREATE_PAYLOAD", {
+      request_id: crypto.randomUUID(),
+      properties,
+    });
 
     const createdPage = await notionFetch(env, "/pages", {
       method: "POST",
