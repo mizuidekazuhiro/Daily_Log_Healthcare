@@ -31,7 +31,7 @@ export const getOrCreateDailyHealthPageId = async (
     body: JSON.stringify({
       parent: { database_id: databaseId },
       properties: {
-        [titleProp]: { title: [{ text: { content: dateJst } }] },
+        [titleProp]: { title: [{ text: { content: `Daily Log | ${dateJst}` } }] },
         [dateProp]: { date: { start: dateJst } },
       },
     }),
