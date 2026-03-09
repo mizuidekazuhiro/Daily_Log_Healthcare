@@ -314,6 +314,7 @@ const dropboxRequest = async (
       url,
       status: response.status,
       ok: response.ok,
+      body: text.slice(0, 1000),
     });
     return { response, text };
   };
@@ -414,10 +415,32 @@ const toDropboxRawUrl = (sharedUrl: string): string => {
     const url = new URL(sharedUrl);
     url.searchParams.set("raw", "1");
     url.searchParams.delete("dl");
-    return url.toString();
+    const converted = url.toString();
+    console.log("DROPBOX_URL_CONVERT", {
+      requestId: currentRequestId,
+      originalUrl: sharedUrl,
+      convertedUrl: converted,
+    });
+    return converted;
   } catch {
+    console.warn("DROPBOX_URL_CONVERT_FAILED", {
+      requestId: currentRequestId,
+      originalUrl: sharedUrl,
+    });
     return sharedUrl;
   }
+};
+
+const isExistingSharedLinkError = (status: number, text: string): boolean => {
+  if (status !== 409) {
+    return false;
+  }
+  const parsed = parseDropboxJson(text);
+  const errorSummary = JSON.stringify(parsed ?? {}).toLowerCase();
+  return (
+    errorSummary.includes("shared_link_already_exists") ||
+    errorSummary.includes("already_exists")
+  );
 };
 
 const buildMealPhotoName = (entry: DropboxFileEntry): string =>
@@ -491,6 +514,12 @@ const getDropboxSharedLink = async (
     return { ok: false, error: "Dropbox file path missing" };
   }
 
+  console.log("DROPBOX_SHARED_LINK_LOOKUP_START", {
+    requestId: currentRequestId,
+    entryId: entry.id,
+    path,
+  });
+
   const existing = await dropboxRequest(env, "sharing/list_shared_links", {
     path,
     direct_only: true,
@@ -509,10 +538,29 @@ const getDropboxSharedLink = async (
     ? (existing.json.links as Array<{ url?: string }>)
     : [];
 
+  console.log("DROPBOX_SHARED_LINK_LOOKUP_END", {
+    requestId: currentRequestId,
+    entryId: entry.id,
+    path,
+    linksCount: links.length,
+  });
+
   const existingUrl = links.find((link) => typeof link.url === "string")?.url;
   if (existingUrl) {
+    console.log("DROPBOX_SHARED_LINK_LOOKUP_HIT", {
+      requestId: currentRequestId,
+      entryId: entry.id,
+      path,
+      sharedUrl: existingUrl,
+    });
     return { ok: true, url: toDropboxRawUrl(existingUrl) };
   }
+
+  console.log("DROPBOX_SHARED_LINK_CREATE_START", {
+    requestId: currentRequestId,
+    entryId: entry.id,
+    path,
+  });
 
   const created = await dropboxRequest(
     env,
@@ -521,6 +569,61 @@ const getDropboxSharedLink = async (
   );
 
   if (!created.ok) {
+    console.warn("DROPBOX_SHARED_LINK_CREATE_FAILED", {
+      requestId: currentRequestId,
+      entryId: entry.id,
+      path,
+      status: created.status,
+      body: created.text.slice(0, 1000),
+    });
+
+    if (isExistingSharedLinkError(created.status, created.text)) {
+      console.log("DROPBOX_SHARED_LINK_CREATE_FALLBACK_START", {
+        requestId: currentRequestId,
+        entryId: entry.id,
+        path,
+      });
+
+      const fallback = await dropboxRequest(env, "sharing/list_shared_links", {
+        path,
+      });
+
+      if (!fallback.ok) {
+        console.error("DROPBOX_SHARED_LINK_CREATE_FALLBACK_FAILED", {
+          requestId: currentRequestId,
+          entryId: entry.id,
+          path,
+          status: fallback.status,
+          body: fallback.text.slice(0, 1000),
+        });
+        return {
+          ok: false,
+          error: "Dropbox API error",
+          status: fallback.status,
+          detail: fallback.text,
+        };
+      }
+
+      const fallbackLinks = Array.isArray(fallback.json.links)
+        ? (fallback.json.links as Array<{ url?: string }>)
+        : [];
+      const fallbackUrl = fallbackLinks.find(
+        (link) => typeof link.url === "string",
+      )?.url;
+
+      console.log("DROPBOX_SHARED_LINK_CREATE_FALLBACK_END", {
+        requestId: currentRequestId,
+        entryId: entry.id,
+        path,
+        linksCount: fallbackLinks.length,
+        foundUrl: Boolean(fallbackUrl),
+      });
+
+      if (fallbackUrl) {
+        return { ok: true, url: toDropboxRawUrl(fallbackUrl) };
+      }
+    }
+
     return {
       ok: false,
       error: "Dropbox API error",
@@ -528,6 +631,13 @@ const getDropboxSharedLink = async (
       detail: created.text,
     };
   }
+
+  console.log("DROPBOX_SHARED_LINK_CREATE_END", {
+    requestId: currentRequestId,
+    entryId: entry.id,
+    path,
+    hasUrl: typeof created.json.url === "string",
+  });
 
   const url =
     typeof created.json.url === "string" ? created.json.url : undefined;
@@ -794,6 +904,17 @@ const runMealPhotos = async (
     },
     env.NOTION_TOKEN,
   );
+
+  console.log("MEAL_PHOTOS_NOTION_APPEND_END", {
+    requestId: currentRequestId,
+    pageId: pageResult.pageId,
+    addedCount: newFiles.length,
+    skippedCount: skipped,
+    status: updateResult.ok ? 200 : updateResult.status,
+    body: updateResult.ok
+      ? JSON.stringify({ id: pageResult.pageId, appended: newFiles.length })
+      : updateResult.text.slice(0, 1000),
+  });
 
   if (!updateResult.ok) {
     return {
