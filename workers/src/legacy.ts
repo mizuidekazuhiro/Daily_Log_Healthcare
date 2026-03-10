@@ -1057,6 +1057,9 @@ const runMealPhotos = async (
 
   const existingState = pageResult.existingState;
   const existingFiles = existingState.existingFiles;
+  const mealPhotosExistingFileCount = existingFiles.length;
+  const dedupBypassedBecauseExistingEmpty =
+    existingState.mealPhotosType === "files" && mealPhotosExistingFileCount === 0;
   const newFiles: NotionFileReference[] = [];
   let skipped = 0;
   let firstComputedSkipReason: MealPhotoSkipReason | null = null;
@@ -1070,6 +1073,8 @@ const runMealPhotos = async (
     requestId: currentRequestId,
     notionMealPhotosType: existingState.mealPhotosType,
     notionMealPhotosFileCount: existingFiles.length,
+    mealPhotosExistingFileCount,
+    dedupBypassedBecauseExistingEmpty,
     sampleExistingDropboxFileId: firstExistingFileId,
     sampleExistingDropboxPath: firstExistingPath,
     sampleCandidateDropboxFileId: firstCandidateKeys.fileId,
@@ -1077,7 +1082,9 @@ const runMealPhotos = async (
   });
 
   for (const entry of targetFiles) {
-    const skipReason = getMealPhotoSkipReason(entry, existingState);
+    const skipReason = dedupBypassedBecauseExistingEmpty
+      ? null
+      : getMealPhotoSkipReason(entry, existingState);
     if (skipReason) {
       if (!firstComputedSkipReason) {
         firstComputedSkipReason = skipReason;
@@ -1113,6 +1120,8 @@ const runMealPhotos = async (
     dropboxTotalCount: listResult.files.length,
     targetDateCount: targetFiles.length,
     notionExistingCount: existingFiles.length,
+    mealPhotosExistingFileCount,
+    dedupBypassedBecauseExistingEmpty,
     newCandidateCount: newFiles.length,
     skippedCount: skipped,
     skippedReasons: existingState.skippedReasonCounts,
