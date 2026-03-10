@@ -41,6 +41,19 @@ type NotionFileReference = {
   file?: { url: string; expiry_time?: string };
 };
 
+type MealPhotoSkipReason =
+  | "already_exists_by_file_id"
+  | "already_exists_by_path"
+  | "invalid_existing_value"
+  | "unsupported_property_shape";
+
+type MealPhotosExistingState = {
+  existingFiles: NotionFileReference[];
+  existingFileIds: Set<string>;
+  existingPaths: Set<string>;
+  skippedReasonCounts: Record<MealPhotoSkipReason, number>;
+};
+
 type MealPhotoRunResult =
   | {
       ok: true;
@@ -498,14 +511,14 @@ const toDropboxRawUrl = (sharedUrl: string): string => {
     const converted = url.toString();
     console.log("DROPBOX_URL_CONVERT", {
       requestId: currentRequestId,
-      originalUrl: sharedUrl,
-      convertedUrl: converted,
+      host: url.host,
+      hasQuery: converted.includes("?"),
     });
     return converted;
   } catch {
     console.warn("DROPBOX_URL_CONVERT_FAILED", {
       requestId: currentRequestId,
-      originalUrl: sharedUrl,
+      reason: "invalid_shared_url",
     });
     return sharedUrl;
   }
@@ -523,23 +536,131 @@ const isExistingSharedLinkError = (status: number, text: string): boolean => {
   );
 };
 
-const buildMealPhotoName = (entry: DropboxFileEntry): string =>
-  `${entry.name} [dropbox-id:${entry.id}]`;
+const normalizeComparisonToken = (value?: string | null): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
 
-const mealPhotoAlreadyAttached = (
+const normalizeDropboxPathForComparison = (value?: string | null): string | null => {
+  const normalized = normalizeComparisonToken(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const withoutQuery = normalized.split("?")[0].trim();
+  if (!withoutQuery) {
+    return null;
+  }
+
+  return withoutQuery.toLowerCase();
+};
+
+const extractTaggedValue = (name: string, tag: "dropbox-id" | "dropbox-path"): string | null => {
+  const match = name.match(new RegExp(`\\[${tag}:([^\\]]+)\\]`));
+  return normalizeComparisonToken(match?.[1] ?? null);
+};
+
+const buildDropboxCandidateKeys = (
   entry: DropboxFileEntry,
-  existingFiles: NotionFileReference[],
-): boolean =>
-  existingFiles.some((file) => {
+): { fileId: string | null; path: string | null } => ({
+  fileId: normalizeComparisonToken(entry.id),
+  path: normalizeDropboxPathForComparison(entry.path_lower ?? entry.path_display),
+});
+
+const buildMealPhotoName = (entry: DropboxFileEntry): string => {
+  const keys = buildDropboxCandidateKeys(entry);
+  const parts = [entry.name];
+  if (keys.fileId) {
+    parts.push(`[dropbox-id:${keys.fileId}]`);
+  }
+  if (keys.path) {
+    // Backward compatibility: keep name-embedded metadata so old entries remain comparable.
+    parts.push(`[dropbox-path:${keys.path}]`);
+  }
+  return parts.join(" ");
+};
+
+const extractMealPhotosExistingState = (
+  properties?: Record<string, unknown>,
+): MealPhotosExistingState => {
+  const initialReasons: Record<MealPhotoSkipReason, number> = {
+    already_exists_by_file_id: 0,
+    already_exists_by_path: 0,
+    invalid_existing_value: 0,
+    unsupported_property_shape: 0,
+  };
+
+  const mealProp = properties?.["Meal Photos"] as
+    | { type?: string; files?: unknown[] }
+    | undefined;
+
+  if (!mealProp) {
+    return {
+      existingFiles: [],
+      existingFileIds: new Set<string>(),
+      existingPaths: new Set<string>(),
+      skippedReasonCounts: initialReasons,
+    };
+  }
+
+  if (mealProp.type !== "files") {
+    initialReasons.unsupported_property_shape += 1;
+    return {
+      existingFiles: [],
+      existingFileIds: new Set<string>(),
+      existingPaths: new Set<string>(),
+      skippedReasonCounts: initialReasons,
+    };
+  }
+
+  const files = Array.isArray(mealProp.files)
+    ? (mealProp.files as NotionFileReference[])
+    : [];
+  const existingFileIds = new Set<string>();
+  const existingPaths = new Set<string>();
+
+  for (const file of files) {
+    if (!file || typeof file !== "object") {
+      initialReasons.invalid_existing_value += 1;
+      continue;
+    }
     const name = typeof file.name === "string" ? file.name : "";
-    const url =
-      file.type === "external" && file.external
-        ? file.external.url
-        : file.type === "file" && file.file
-          ? file.file.url
-          : "";
-    return name.includes(entry.id) || url.includes(entry.id);
-  });
+    const existingId = extractTaggedValue(name, "dropbox-id");
+    const existingPath = normalizeDropboxPathForComparison(
+      extractTaggedValue(name, "dropbox-path"),
+    );
+    if (existingId) {
+      existingFileIds.add(existingId);
+    }
+    if (existingPath) {
+      existingPaths.add(existingPath);
+    }
+  }
+
+  return {
+    existingFiles: files,
+    existingFileIds,
+    existingPaths,
+    skippedReasonCounts: initialReasons,
+  };
+};
+
+const getMealPhotoSkipReason = (
+  entry: DropboxFileEntry,
+  existingState: MealPhotosExistingState,
+): MealPhotoSkipReason | null => {
+  const keys = buildDropboxCandidateKeys(entry);
+  if (keys.fileId && existingState.existingFileIds.has(keys.fileId)) {
+    return "already_exists_by_file_id";
+  }
+  if (keys.path && existingState.existingPaths.has(keys.path)) {
+    return "already_exists_by_path";
+  }
+  return null;
+};
 
 const listDropboxFiles = async (
   env: Env,
@@ -621,7 +742,7 @@ const getDropboxSharedLink = async (
       requestId: currentRequestId,
       entryId: entry.id,
       path,
-      sharedUrl: existingUrl,
+      reusedExistingLink: true,
     });
     return { ok: true, url: toDropboxRawUrl(existingUrl) };
   }
@@ -739,7 +860,7 @@ const ensureDailyLogPageByDate = async (
   env: Env,
   date: string,
 ): Promise<
-  | { ok: true; pageId: string; existingFiles: NotionFileReference[] }
+  | { ok: true; pageId: string; existingState: MealPhotosExistingState }
   | MealPhotoRunResult
 > => {
   const queryBody = {
@@ -800,18 +921,10 @@ const ensureDailyLogPageByDate = async (
       };
     }
 
-    const properties = pageResult.json.properties as
-      | Record<string, unknown>
-      | undefined;
-    const mealProp = properties?.["Meal Photos"] as
-      | { type?: string; files?: NotionFileReference[] }
-      | undefined;
-    const existingFiles =
-      mealProp?.type === "files" && Array.isArray(mealProp.files)
-        ? mealProp.files
-        : [];
+    const properties = pageResult.json.properties as Record<string, unknown> | undefined;
+    const existingState = extractMealPhotosExistingState(properties);
 
-    return { ok: true, pageId, existingFiles };
+    return { ok: true, pageId, existingState };
   }
 
   const createProps: Record<string, unknown> = {
@@ -855,7 +968,11 @@ const ensureDailyLogPageByDate = async (
   }
 
   console.log("Created Daily_Log page for meal photos", { date });
-  return { ok: true, pageId: createdId, existingFiles: [] };
+  return {
+    ok: true,
+    pageId: createdId,
+    existingState: extractMealPhotosExistingState(),
+  };
 };
 
 const runMealPhotos = async (
@@ -923,13 +1040,16 @@ const runMealPhotos = async (
     return pageResult;
   }
 
-  const existingFiles = pageResult.existingFiles;
+  const existingState = pageResult.existingState;
+  const existingFiles = existingState.existingFiles;
   const newFiles: NotionFileReference[] = [];
   let skipped = 0;
 
   for (const entry of targetFiles) {
-    if (mealPhotoAlreadyAttached(entry, existingFiles)) {
+    const skipReason = getMealPhotoSkipReason(entry, existingState);
+    if (skipReason) {
       skipped += 1;
+      existingState.skippedReasonCounts[skipReason] += 1;
       continue;
     }
 
@@ -943,7 +1063,26 @@ const runMealPhotos = async (
       type: "external",
       external: { url: linkResult.url },
     });
+
+    const newKeys = buildDropboxCandidateKeys(entry);
+    if (newKeys.fileId) {
+      existingState.existingFileIds.add(newKeys.fileId);
+    }
+    if (newKeys.path) {
+      existingState.existingPaths.add(newKeys.path);
+    }
   }
+
+  console.log("MEAL_PHOTOS_DEDUP_SUMMARY", {
+    requestId: currentRequestId,
+    targetDate,
+    dropboxTotalCount: listResult.files.length,
+    targetDateCount: targetFiles.length,
+    notionExistingCount: existingFiles.length,
+    newCandidateCount: newFiles.length,
+    skippedCount: skipped,
+    skippedReasons: existingState.skippedReasonCounts,
+  });
 
   if (newFiles.length === 0) {
     return {
