@@ -5,11 +5,11 @@ compatibility_date = "2025-12-01"
 [vars]
 HEALTH_DATE_PROP = "Date"
 HEALTH_TITLE_PROP = "Name"
-MEAL_PHOTOS_FOLDER_PATH = ""
-DROPBOX_CLIENT_ID = ""
+MEAL_PHOTOS_FOLDER_PATH = "/2026_meal"
+DROPBOX_CLIENT_ID = "3pa2irxaypyniq5"
 
 [env.production.vars]
 HEALTH_DATE_PROP = "Date"
 HEALTH_TITLE_PROP = "Name"
-MEAL_PHOTOS_FOLDER_PATH = ""
-DROPBOX_CLIENT_ID = ""
+MEAL_PHOTOS_FOLDER_PATH = "/2026_meal"
+DROPBOX_CLIENT_ID = "3pa2irxaypyniq5"
