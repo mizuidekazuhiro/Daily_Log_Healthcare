@@ -48,6 +48,7 @@ type MealPhotoSkipReason =
   | "unsupported_property_shape";
 
 type MealPhotosExistingState = {
+  mealPhotosType: string | null;
   existingFiles: NotionFileReference[];
   existingFileIds: Set<string>;
   existingPaths: Set<string>;
@@ -563,6 +564,13 @@ const extractTaggedValue = (name: string, tag: "dropbox-id" | "dropbox-path"): s
   return normalizeComparisonToken(match?.[1] ?? null);
 };
 
+const isDropboxExternalUrl = (url?: string): boolean => {
+  if (typeof url !== "string") {
+    return false;
+  }
+  return /(^https?:\/\/)?([^.]+\.)*dropbox(?:usercontent)?\.com\//i.test(url);
+};
+
 const buildDropboxCandidateKeys = (
   entry: DropboxFileEntry,
 ): { fileId: string | null; path: string | null } => ({
@@ -599,6 +607,7 @@ const extractMealPhotosExistingState = (
 
   if (!mealProp) {
     return {
+      mealPhotosType: null,
       existingFiles: [],
       existingFileIds: new Set<string>(),
       existingPaths: new Set<string>(),
@@ -609,6 +618,7 @@ const extractMealPhotosExistingState = (
   if (mealProp.type !== "files") {
     initialReasons.unsupported_property_shape += 1;
     return {
+      mealPhotosType: mealProp.type ?? null,
       existingFiles: [],
       existingFileIds: new Set<string>(),
       existingPaths: new Set<string>(),
@@ -628,6 +638,10 @@ const extractMealPhotosExistingState = (
       continue;
     }
     const name = typeof file.name === "string" ? file.name : "";
+    // Only trust name-embedded dedup metadata for Dropbox external files.
+    if (file.type !== "external" || !isDropboxExternalUrl(file.external?.url)) {
+      continue;
+    }
     const existingId = extractTaggedValue(name, "dropbox-id");
     const existingPath = normalizeDropboxPathForComparison(
       extractTaggedValue(name, "dropbox-path"),
@@ -641,6 +655,7 @@ const extractMealPhotosExistingState = (
   }
 
   return {
+    mealPhotosType: mealProp.type ?? null,
     existingFiles: files,
     existingFileIds,
     existingPaths,
@@ -1044,10 +1059,29 @@ const runMealPhotos = async (
   const existingFiles = existingState.existingFiles;
   const newFiles: NotionFileReference[] = [];
   let skipped = 0;
+  let firstComputedSkipReason: MealPhotoSkipReason | null = null;
+
+  const firstExistingFileId = Array.from(existingState.existingFileIds)[0] ?? null;
+  const firstExistingPath = Array.from(existingState.existingPaths)[0] ?? null;
+  const firstCandidateKeys =
+    targetFiles.length > 0 ? buildDropboxCandidateKeys(targetFiles[0]) : { fileId: null, path: null };
+
+  console.log("MEAL_PHOTOS_DEDUP_DIAGNOSTICS", {
+    requestId: currentRequestId,
+    notionMealPhotosType: existingState.mealPhotosType,
+    notionMealPhotosFileCount: existingFiles.length,
+    sampleExistingDropboxFileId: firstExistingFileId,
+    sampleExistingDropboxPath: firstExistingPath,
+    sampleCandidateDropboxFileId: firstCandidateKeys.fileId,
+    sampleCandidateDropboxPath: firstCandidateKeys.path,
+  });
 
   for (const entry of targetFiles) {
     const skipReason = getMealPhotoSkipReason(entry, existingState);
     if (skipReason) {
+      if (!firstComputedSkipReason) {
+        firstComputedSkipReason = skipReason;
+      }
       skipped += 1;
       existingState.skippedReasonCounts[skipReason] += 1;
       continue;
@@ -1082,6 +1116,7 @@ const runMealPhotos = async (
     newCandidateCount: newFiles.length,
     skippedCount: skipped,
     skippedReasons: existingState.skippedReasonCounts,
+    firstComputedSkipReason,
   });
 
   if (newFiles.length === 0) {
