@@ -4,11 +4,15 @@ export interface Env {
   NOTION_TOKEN: string;
   DAILY_LOG_DB_ID: string;
   HEALTH_API_KEY: string;
+  DROPBOX_CLIENT_ID?: string;
+  DROPBOX_CLIENT_SECRET?: string;
+  DROPBOX_REFRESH_TOKEN?: string;
+  MEAL_PHOTOS_FOLDER_PATH?: string;
+  // temporary backward compatibility
   DROPBOX_ACCESS_TOKEN?: string;
   DROPBOX_APP_KEY?: string;
   DROPBOX_APP_SECRET?: string;
-  DROPBOX_REFRESH_TOKEN?: string;
-  DROPBOX_FOLDER_PATH: string;
+  DROPBOX_FOLDER_PATH?: string;
 }
 
 type Payload = {
@@ -51,6 +55,7 @@ type MealPhotoRunResult =
       detail?: string;
       status?: number;
       date?: string;
+      code?: string;
     };
 
 const NOTION_VERSION = "2022-06-28";
@@ -187,13 +192,22 @@ type DropboxTokenCache = {
 
 let cachedDropboxAccessToken: DropboxTokenCache | null = null;
 
+const getDropboxClientId = (env: Env): string | undefined =>
+  env.DROPBOX_CLIENT_ID ?? env.DROPBOX_APP_KEY;
+
+const getDropboxClientSecret = (env: Env): string | undefined =>
+  env.DROPBOX_CLIENT_SECRET ?? env.DROPBOX_APP_SECRET;
+
+const getMealPhotosFolderPath = (env: Env): string | undefined =>
+  env.MEAL_PHOTOS_FOLDER_PATH ?? env.DROPBOX_FOLDER_PATH;
+
 const getMissingDropboxRefreshEnv = (env: Env): string[] => {
   const missing: string[] = [];
-  if (!env.DROPBOX_APP_KEY) {
-    missing.push("DROPBOX_APP_KEY");
+  if (!getDropboxClientId(env)) {
+    missing.push("DROPBOX_CLIENT_ID");
   }
-  if (!env.DROPBOX_APP_SECRET) {
-    missing.push("DROPBOX_APP_SECRET");
+  if (!getDropboxClientSecret(env)) {
+    missing.push("DROPBOX_CLIENT_SECRET");
   }
   if (!env.DROPBOX_REFRESH_TOKEN) {
     missing.push("DROPBOX_REFRESH_TOKEN");
@@ -209,48 +223,78 @@ const refreshDropboxAccessToken = async (env: Env): Promise<string> => {
     );
   }
 
+  const clientId = getDropboxClientId(env) as string;
+  const clientSecret = getDropboxClientSecret(env) as string;
+
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: env.DROPBOX_REFRESH_TOKEN as string,
-    client_id: env.DROPBOX_APP_KEY as string,
-    client_secret: env.DROPBOX_APP_SECRET as string,
+    client_id: clientId,
+    client_secret: clientSecret,
   });
 
-  // LOG: Dropbox token fetch start with requestId
-  console.log("DROPBOX_TOKEN_FETCH_START", {
+  console.log("DROPBOX_TOKEN_REFRESH_START", {
     requestId: currentRequestId,
     url: "https://api.dropboxapi.com/oauth2/token",
-  });
-  const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
+    grantType: "refresh_token",
   });
 
-  const text = await res.text();
-  // LOG: Dropbox token fetch end with requestId and status
-  console.log("DROPBOX_TOKEN_FETCH_END", {
+  const controller = new AbortController();
+  const timeoutMs = 10_000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  let text = "";
+  try {
+    res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: controller.signal,
+    });
+    text = await res.text();
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === "AbortError";
+    console.error("DROPBOX_TOKEN_REFRESH_ERROR", {
+      requestId: currentRequestId,
+      reason: isAbort ? "timeout" : "network_or_runtime",
+      timeoutMs,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(
+      isAbort
+        ? `Dropbox token refresh timeout (${timeoutMs}ms)`
+        : "Dropbox token refresh request failed",
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  console.log("DROPBOX_TOKEN_REFRESH_END", {
     requestId: currentRequestId,
     url: "https://api.dropboxapi.com/oauth2/token",
     status: res.status,
     ok: res.ok,
   });
+
   if (!res.ok) {
-    // LOG: Dropbox token fetch error with response body preview
-    console.error("DROPBOX_TOKEN_FETCH_ERROR", {
+    console.error("DROPBOX_TOKEN_REFRESH_ERROR", {
       requestId: currentRequestId,
-      url: "https://api.dropboxapi.com/oauth2/token",
       status: res.status,
       body: text.slice(0, 300),
     });
-    console.error("Dropbox token refresh failed", {
-      status: res.status,
-      body: text,
-    });
-    throw new Error(`Dropbox token refresh failed: ${res.status}`);
+    throw new Error(
+      `Dropbox token refresh failed (status=${res.status})`,
+    );
   }
 
-  const data = JSON.parse(text) as { access_token?: string };
+  let data: { access_token?: string; token_type?: string; expires_in?: number };
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("Dropbox token refresh failed: invalid JSON response");
+  }
+
   if (!data.access_token) {
     throw new Error("Dropbox token refresh failed: missing access_token");
   }
@@ -283,6 +327,34 @@ const parseDropboxJson = (text: string): any | null => {
     return null;
   }
 };
+
+
+const getDropboxErrorSummary = (text: string): string | null => {
+  const parsed = parseDropboxJson(text);
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const summary = (parsed as { error_summary?: unknown }).error_summary;
+  return typeof summary === "string" ? summary : null;
+};
+
+const isDropboxAccessTokenExpiredError = (status: number, text: string): boolean => {
+  if (status !== 401) return false;
+  const summary = getDropboxErrorSummary(text);
+  return Boolean(summary && summary.includes("expired_access_token"));
+};
+
+const buildDropboxApiError = (status: number, text: string): MealPhotoRunResult => ({
+  ok: false,
+  error: isDropboxAccessTokenExpiredError(status, text)
+    ? "dropbox_access_token_expired"
+    : "Dropbox API error",
+  code: isDropboxAccessTokenExpiredError(status, text)
+    ? "dropbox_access_token_expired"
+    : undefined,
+  status,
+  detail: text,
+});
 
 const dropboxRequest = async (
   env: Env,
@@ -323,9 +395,12 @@ const dropboxRequest = async (
   let { response, text } = await makeRequest(token);
 
   if (response.status === 401) {
-    console.warn("Dropbox API unauthorized", {
-      endpoint,
+    const errorSummary = getDropboxErrorSummary(text);
+    console.warn("DROPBOX_API_UNAUTHORIZED", {
+      requestId: currentRequestId,
+      api: endpoint,
       status: response.status,
+      errorSummary,
     });
     try {
       token = await getDropboxAccessToken(env, { forceRefresh: true });
@@ -333,9 +408,11 @@ const dropboxRequest = async (
       response = retry.response;
       text = retry.text;
       if (response.status === 401) {
-        console.warn("Dropbox API unauthorized after refresh", {
-          endpoint,
+        console.warn("DROPBOX_API_UNAUTHORIZED_AFTER_REFRESH", {
+          requestId: currentRequestId,
+          api: endpoint,
           status: response.status,
+          errorSummary: getDropboxErrorSummary(text),
         });
       }
     } catch (error) {
@@ -348,10 +425,13 @@ const dropboxRequest = async (
 
   if (!response.ok) {
     // LOG: Dropbox fetch error with response body preview
+    const errorSummary = getDropboxErrorSummary(text);
     console.error("DROPBOX_FETCH_ERROR", {
       requestId: currentRequestId,
+      api: endpoint,
       url: `https://api.dropboxapi.com/2/${endpoint}`,
       status: response.status,
+      errorSummary,
       body: text.slice(0, 300),
     });
     return {
@@ -472,17 +552,12 @@ const listDropboxFiles = async (
     const endpoint = cursor ? "files/list_folder/continue" : "files/list_folder";
     const body = cursor
       ? { cursor }
-      : { path: env.DROPBOX_FOLDER_PATH || "", recursive: false };
+      : { path: getMealPhotosFolderPath(env) || "", recursive: false };
 
     const result = await dropboxRequest(env, endpoint, body);
 
     if (!result.ok) {
-      return {
-        ok: false,
-        error: "Dropbox API error",
-        status: result.status,
-        detail: result.text,
-      };
+      return buildDropboxApiError(result.status, result.text);
     }
 
     const entries = Array.isArray(result.json.entries)
@@ -526,12 +601,7 @@ const getDropboxSharedLink = async (
   });
 
   if (!existing.ok) {
-    return {
-      ok: false,
-      error: "Dropbox API error",
-      status: existing.status,
-      detail: existing.text,
-    };
+    return buildDropboxApiError(existing.status, existing.text);
   }
 
   const links = Array.isArray(existing.json.links)
@@ -596,12 +666,7 @@ const getDropboxSharedLink = async (
           status: fallback.status,
           body: fallback.text.slice(0, 1000),
         });
-        return {
-          ok: false,
-          error: "Dropbox API error",
-          status: fallback.status,
-          detail: fallback.text,
-        };
+        return buildDropboxApiError(fallback.status, fallback.text);
       }
 
       const fallbackLinks = Array.isArray(fallback.json.links)
@@ -624,12 +689,7 @@ const getDropboxSharedLink = async (
       }
     }
 
-    return {
-      ok: false,
-      error: "Dropbox API error",
-      status: created.status,
-      detail: created.text,
-    };
+    return buildDropboxApiError(created.status, created.text);
   }
 
   console.log("DROPBOX_SHARED_LINK_CREATE_END", {
@@ -812,12 +872,10 @@ const runMealPhotos = async (
   });
 
   const missingEnv: string[] = [];
-  if (!env.DROPBOX_FOLDER_PATH) {
-    missingEnv.push("DROPBOX_FOLDER_PATH");
+  if (!getMealPhotosFolderPath(env)) {
+    missingEnv.push("MEAL_PHOTOS_FOLDER_PATH");
   }
-  if (!env.DROPBOX_ACCESS_TOKEN) {
-    missingEnv.push(...getMissingDropboxRefreshEnv(env));
-  }
+  missingEnv.push(...getMissingDropboxRefreshEnv(env));
   if (missingEnv.length > 0) {
     return {
       ok: false,
@@ -847,6 +905,13 @@ const runMealPhotos = async (
     }
     const modifiedDate = new Date(entry.server_modified);
     return formatJstDate(modifiedDate) === targetDate;
+  });
+
+  console.log("MEAL_PHOTOS_COUNT", {
+    requestId: currentRequestId,
+    targetDate,
+    totalDropboxFiles: listResult.files.length,
+    targetFiles: targetFiles.length,
   });
 
   if (targetFiles.length === 0) {
@@ -890,6 +955,12 @@ const runMealPhotos = async (
     };
   }
 
+  console.log("NOTION_APPEND_START", {
+    requestId: currentRequestId,
+    pageId: pageResult.pageId,
+    appendCount: newFiles.length,
+  });
+
   const updateResult = await notionRequest(
     `https://api.notion.com/v1/pages/${pageResult.pageId}`,
     {
@@ -905,7 +976,7 @@ const runMealPhotos = async (
     env.NOTION_TOKEN,
   );
 
-  console.log("MEAL_PHOTOS_NOTION_APPEND_END", {
+  console.log("NOTION_APPEND_END", {
     requestId: currentRequestId,
     pageId: pageResult.pageId,
     addedCount: newFiles.length,
@@ -1164,7 +1235,7 @@ const handleMealPhotosRun = async (
       // LOG: Request JSON body with requestId
       console.log("MEAL_PHOTOS_REQUEST_BODY", {
         requestId,
-        body,
+        body: { hasDate: typeof body?.date === "string", date: body?.date ?? null },
       });
       if (typeof body?.date === "string" && body.date.trim()) {
         requestedDate = body.date.trim();
@@ -1177,18 +1248,26 @@ const handleMealPhotosRun = async (
   try {
     const result = await runMealPhotos(env, requestedDate);
     if (!result.ok) {
-      console.error("Meal photos run failed", {
+      console.error("MEAL_PHOTOS_ERROR", {
         requestId,
         error: result.error,
+        code: result.code,
         status: result.status,
         date: result.date,
       });
       return jsonResponse({ ...result, requestId }, 502);
     }
+    console.log("MEAL_PHOTOS_DONE", {
+      requestId,
+      date: result.date,
+      action: result.action,
+      added: result.added,
+      skipped: result.skipped,
+    });
     return jsonResponse({ ...result, requestId }, 200);
   } catch (error) {
     // LOG: Catch block with requestId
-    console.error("MEAL_PHOTOS_CATCH", {
+    console.error("MEAL_PHOTOS_ERROR", {
       requestId,
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,

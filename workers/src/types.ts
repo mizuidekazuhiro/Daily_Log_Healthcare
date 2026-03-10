@@ -10,9 +10,13 @@ export interface Env {
   // legacy envs
   DAILY_LOG_DB_ID?: string;
   DROPBOX_ACCESS_TOKEN?: string;
+  DROPBOX_CLIENT_ID?: string;
+  DROPBOX_CLIENT_SECRET?: string;
+  DROPBOX_REFRESH_TOKEN?: string;
+  MEAL_PHOTOS_FOLDER_PATH?: string;
+  // temporary backward compatibility
   DROPBOX_APP_KEY?: string;
   DROPBOX_APP_SECRET?: string;
-  DROPBOX_REFRESH_TOKEN?: string;
   DROPBOX_FOLDER_PATH?: string;
 }
 
