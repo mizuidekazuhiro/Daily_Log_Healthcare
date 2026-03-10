@@ -1,6 +1,6 @@
-# Daily Log Healthcare (Notion ⇄ Cloudflare Workers)
+# Daily Log Healthcare (Cloudflare Workers)
 
-iPhoneショートカットやGitHub Actionsから Cloudflare Workers API を呼び、Notion の Daily Health / Supplement Intake を更新するリポジトリです。
+Notion の Daily Log / Supplements を Cloudflare Workers 経由で更新するプロジェクトです。
 
 - Health Daily Upsert: `POST /api/health/daily`
 - Meal Photos 連携: `POST /api/daily-log/meal-photos/run`
@@ -9,220 +9,150 @@ iPhoneショートカットやGitHub Actionsから Cloudflare Workers API を呼
 
 ---
 
-## 1. セットアップ全体像
+## meal photos 処理の概要
 
-1. Notion DB を準備（Daily Health / Supplements / Supplement Intake Log）
-2. Cloudflare Workers に `wrangler deploy` でデプロイ
-3. Workers Runtime Secrets を `wrangler secret put` で投入
-4. iPhoneショートカット / GitHub Actions から API 呼び出し
+`/api/daily-log/meal-photos/run` は次を行います。
+
+1. 対象日（指定がなければ JST 前日）を決定
+2. Dropbox の指定フォルダから画像を取得
+3. 対象日の画像だけを抽出
+4. Notion Daily Log ページを検索（なければ作成）
+5. Dropbox 共有リンクを作成して Notion の `Meal Photos` に追記
 
 ---
 
-## 2. Secrets / Vars の配置方針（結論先出し）
+## なぜ fixed access token ではなく refresh token 方式にするのか
 
-### A. どこに何を置くか
+Dropbox の **access token は期限切れ** になります。固定 token を環境変数に置いて使い続けると、`401 expired_access_token` で止まりやすくなります。
 
-- **Cloudflare Workers Runtime で参照する値は Cloudflare 側に置く**
-  - `NOTION_TOKEN`, `HEALTH_API_KEY`, 各 DB ID は Workers の Secrets
-- **GitHub Actions には原則「実行基盤の認証」だけを置く**
-  - 例: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
-- `NOTION_TOKEN` や `HEALTH_API_KEY` を GitHub Secrets に複製する方式は、
-  - 漏洩面のリスク増
-  - 値の二重管理による運用ミス
-  につながるため、**デプロイ用途では非推奨**
+このプロジェクトでは以下に変更しています。
 
-> 例外: このリポジトリの `daily-log-meal-photos` workflow は「APIクライアント」として Workers を叩くため、`HEALTH_API_KEY` を GitHub Secrets に持たせる運用も可能です（最小権限・ローテーション推奨）。
+- 主経路: `DROPBOX_REFRESH_TOKEN` + `DROPBOX_CLIENT_ID` + `DROPBOX_CLIENT_SECRET` から都度 access token を取得
+- フォールバック: `DROPBOX_ACCESS_TOKEN`（互換目的のみ。将来的に削除推奨）
 
-### B. 具体的な設定先（このリポジトリ向け）
+---
 
-| 区分 | 置く場所 | キー |
-|---|---|---|
-| Deploy 実行用 | GitHub Secrets（Actions） | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`（必要に応じ `CLOUDFLARE_PROJECT_NAME`） |
-| Meal Photos 呼び出し用 | GitHub Secrets（Actions） | `MEAL_PHOTOS_ENDPOINT`, `HEALTH_API_KEY` |
-| Runtime 機密情報 | Cloudflare Workers Secrets | `NOTION_TOKEN`, `HEALTH_API_KEY`, `SUPPLEMENTS_DB_ID`, `INTAKE_LOG_DB_ID`, `HEALTH_DB_ID` |
-| Runtime 非機密設定 | `wrangler.toml` の `vars` | `HEALTH_DATE_PROP`, `HEALTH_TITLE_PROP` |
+## 環境変数一覧（Secrets / vars の分離）
 
-### C. 「デプロイで値が消える」事故を防ぐ運用（最重要）
+### Secrets に置くもの（機密）
 
-原因例:
-- ダッシュボード手入力と CI/CD の設定がずれる
-- 別環境へのデプロイで想定外の値になる
+- `NOTION_TOKEN`
+- `HEALTH_API_KEY`
+- `DROPBOX_CLIENT_SECRET`
+- `DROPBOX_REFRESH_TOKEN`
+- `SUPPLEMENTS_DB_ID`
+- `INTAKE_LOG_DB_ID`
+- `HEALTH_DB_ID`
 
-対策（Source of Truth を wrangler に統一）:
-1. **Secrets は `wrangler secret put` で投入する**
-2. **Vars は `wrangler.toml` で管理する**
-3. ダッシュボード手入力を常用しない（緊急時のみ）
+> `DROPBOX_CLIENT_ID` は公開されても致命傷ではないケースが多いですが、運用ポリシー上 Secret 扱いでも問題ありません。
 
-### Secrets 初期投入コマンド
+### vars（`wrangler.toml`）に置けるもの（非機密）
 
-```bash
-wrangler secret put NOTION_TOKEN
-wrangler secret put HEALTH_API_KEY
-wrangler secret put SUPPLEMENTS_DB_ID
-wrangler secret put INTAKE_LOG_DB_ID
-wrangler secret put HEALTH_DB_ID
-```
+- `HEALTH_DATE_PROP`
+- `HEALTH_TITLE_PROP`
+- `MEAL_PHOTOS_FOLDER_PATH`
+- `DROPBOX_CLIENT_ID`（Secret 扱いにする場合は vars から削除）
+- `TZ`（必要なら）
 
-環境分離する場合（例: production）:
+---
+
+## Cloudflare Workers で Secret を設定する具体例
+
+### 本番（`--env production`）
 
 ```bash
 wrangler secret put NOTION_TOKEN --env production
 wrangler secret put HEALTH_API_KEY --env production
+wrangler secret put DROPBOX_CLIENT_SECRET --env production
+wrangler secret put DROPBOX_REFRESH_TOKEN --env production
 wrangler secret put SUPPLEMENTS_DB_ID --env production
 wrangler secret put INTAKE_LOG_DB_ID --env production
 wrangler secret put HEALTH_DB_ID --env production
 ```
 
+### デフォルト環境
+
+```bash
+wrangler secret put NOTION_TOKEN
+wrangler secret put HEALTH_API_KEY
+wrangler secret put DROPBOX_CLIENT_SECRET
+wrangler secret put DROPBOX_REFRESH_TOKEN
+```
+
 ---
 
-## 3. デプロイ
+## ローカル開発の設定方法
 
-- `wrangler.toml` はこのリポジトリに同梱済み
-- デプロイ:
+Cloudflare Workers のローカル実行では `.dev.vars` が使えます。
+
+1. ひな形をコピー
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+2. `.dev.vars` に実値を設定（コミットしない）
+3. 開発サーバ起動
+
+```bash
+npm run dev
+```
+
+---
+
+## 本番 deploy 手順
+
+1. `wrangler.toml` の vars を確認
+2. 必要な Secret が Cloudflare 側に設定済みか確認
+3. デプロイ
 
 ```bash
 npm run deploy
 ```
 
-内部では `wrangler deploy` を実行します。
+> 重要: **deploy で Secret は自動投入されません**。Secret は `wrangler secret put` で別管理します。
 
 ---
 
-## 4. Cloudflare Workers 環境変数
+## deploy 前後のチェック手順（設定事故防止）
 
-### Secrets（機密）
+### deploy 前
 
-- `NOTION_TOKEN`
-- `HEALTH_API_KEY`
-- `SUPPLEMENTS_DB_ID`
-- `INTAKE_LOG_DB_ID`
-- `HEALTH_DB_ID`
+- `wrangler.toml` の vars が想定値か確認
+- `DROPBOX_CLIENT_SECRET` / `DROPBOX_REFRESH_TOKEN` を Secret として設定済みか確認
+- `MEAL_PHOTOS_FOLDER_PATH` が空文字でないことを確認
 
-### Vars（非機密）
+### deploy 後
 
-- `HEALTH_DATE_PROP`（省略時デフォルト: `Date`）
-- `HEALTH_TITLE_PROP`（省略時デフォルト: `Name`）
+- `/api/daily-log/meal-photos/run` を手動実行
+- Workers Logs で以下ログが揃っているか確認
+  - `MEAL_PHOTOS_START`
+  - `DROPBOX_TOKEN_REFRESH_START` / `DROPBOX_TOKEN_REFRESH_END`
+  - `DROPBOX_FETCH_START` / `DROPBOX_FETCH_END`
+  - `NOTION_APPEND_START` / `NOTION_APPEND_END`
+  - `MEAL_PHOTOS_DONE` または `MEAL_PHOTOS_ERROR`
 
 ---
 
-## 5. 認証仕様（統一）
+## 401 `expired_access_token` が出たときの確認ポイント
 
-このリポジトリのヘルス系 API はすべて以下で認証します。
+1. `DROPBOX_REFRESH_TOKEN` が有効か
+2. `DROPBOX_CLIENT_ID` / `DROPBOX_CLIENT_SECRET` の組み合わせが正しいか
+3. Logs に `DROPBOX_API_UNAUTHORIZED` が出ていないか
+4. レスポンス `error` / `code` が `dropbox_access_token_expired` になっていないか
+
+---
+
+## API 認証仕様
 
 - Header: `Authorization: Bearer <HEALTH_API_KEY>`
-- 検証: `token === env.HEALTH_API_KEY`
 - 不一致時: `401 Unauthorized`
 
 ---
 
-## 6. API 仕様
+## セキュリティ注意（必読）
 
-### POST `/api/health/daily`
-
-- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
-- 必須: `date` (`YYYY-MM-DD`)
-- 送信されたキーのみ更新（`null/undefined` は上書きしない）
-
-```bash
-export HEALTH_API_KEY="your-api-key"
-curl -X POST "https://<worker>.workers.dev/api/health/daily" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $HEALTH_API_KEY" \
-  -d '{
-    "date":"2026-01-25",
-    "weight":71.2,
-    "protein":120,
-    "fat":60,
-    "carb":220,
-    "kcal":2100,
-    "source":"healthcare kit"
-  }'
-```
-
-### POST `/api/daily-log/meal-photos/run`
-
-- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
-- body は `{}` でも実行可能
-
-```bash
-curl -X POST "https://<worker>.workers.dev/api/daily-log/meal-photos/run" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $HEALTH_API_KEY" \
-  -d '{}'
-```
-
-### GET `/api/supplements`
-
-- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
-- `Active=true` がある場合は優先返却
-
-```bash
-curl -X GET "https://<worker>.workers.dev/api/supplements" \
-  -H "Authorization: Bearer $HEALTH_API_KEY"
-```
-
-### POST `/api/supplement_intakes`
-
-- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
-
-```bash
-curl -X POST "https://<worker>.workers.dev/api/supplement_intakes" \
-  -H "Authorization: Bearer $HEALTH_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "taken_at":"2026-02-11T08:15:00+09:00",
-    "supplement_ids":["<supplement_page_id_1>","<supplement_page_id_2>"],
-    "source":"shortcut"
-  }'
-```
-
----
-
-## 7. iPhoneショートカット設定
-
-### サプリ一覧取得
-
-- `GET /api/supplements`
-- Header: `Authorization: Bearer <HEALTH_API_KEY>`
-
-### サプリ摂取記録
-
-- `POST /api/supplement_intakes`
-- Header:
-  - `Authorization: Bearer <HEALTH_API_KEY>`
-  - `Content-Type: application/json`
-- Body: `taken_at`, `supplement_ids`, `source`
-
-> セキュリティ注意: `HEALTH_API_KEY` はショートカット内で利用するため、ショートカット共有時の漏洩に注意してください（共有前にキー削除・再設定推奨）。
-
----
-
-## 8. GitHub Actions（Meal Photos 実行）
-
-Workflow: `.github/workflows/daily-log-meal-photos.yml`
-
-必要な GitHub Secrets:
-- `MEAL_PHOTOS_ENDPOINT`
-- `HEALTH_API_KEY`
-
-この workflow は Workers API を定期実行する「クライアント用途」です。Deploy 用 Secrets（Cloudflare API Token 等）とは用途が異なります。
-
----
-
-## 9. Notion DB 要件（サプリ機能）
-
-### Supplements DB
-- `Name` (title)
-- `Active` (checkbox, 推奨)
-
-### Supplement Intake Log DB
-- `Name` (title)
-- `TakenAt` (date)
-- `Supplement` (relation)
-- `Daily Health` (relation)
-- `Source` (select, 任意)
-
-### Daily Health DB
-- `Date` (date)
-- `Name` (title)
-
+- access token / refresh token / client secret を **コードに直書きしない**
+- token, secret を **ログ出力しない**
+- `.dev.vars` を **Git 管理しない**
+- トラブル時も、ログに機密値全文を出さない（先頭数百文字の安全な範囲に限定）

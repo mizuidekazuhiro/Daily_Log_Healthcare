@@ -1,0 +1,18 @@
+# Local only. Copy to .dev.vars and fill real values.
+NOTION_TOKEN=
+HEALTH_API_KEY=
+SUPPLEMENTS_DB_ID=
+INTAKE_LOG_DB_ID=
+HEALTH_DB_ID=
+
+# Dropbox refresh-token flow (recommended)
+DROPBOX_CLIENT_ID=
+DROPBOX_CLIENT_SECRET=
+DROPBOX_REFRESH_TOKEN=
+MEAL_PHOTOS_FOLDER_PATH=
+
+# Optional backward compatibility only (do not use in production)
+# DROPBOX_ACCESS_TOKEN=
+
+HEALTH_DATE_PROP=Date
+HEALTH_TITLE_PROP=Name
