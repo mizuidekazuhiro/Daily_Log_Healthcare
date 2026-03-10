@@ -578,17 +578,82 @@ const buildDropboxCandidateKeys = (
   path: normalizeDropboxPathForComparison(entry.path_lower ?? entry.path_display),
 });
 
+const NOTION_FILE_NAME_MAX_LEN = 100;
+
+const sanitizeNotionFileName = (
+  filename: string,
+  maxLen: number = NOTION_FILE_NAME_MAX_LEN,
+): string => {
+  if (!filename) {
+    return "meal_photo";
+  }
+
+  const basename = String(filename)
+    .trim()
+    .split(/[/\\]/)
+    .pop()
+    ?.trim();
+
+  if (!basename) {
+    return "meal_photo";
+  }
+
+  const whitespaceSanitized = basename
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!whitespaceSanitized) {
+    return "meal_photo";
+  }
+
+  const extIndex = whitespaceSanitized.lastIndexOf(".");
+  const hasExt = extIndex > 0 && extIndex < whitespaceSanitized.length - 1;
+  let base = hasExt ? whitespaceSanitized.slice(0, extIndex) : whitespaceSanitized;
+  let ext = hasExt ? whitespaceSanitized.slice(extIndex) : "";
+
+  if (ext.length > 10) {
+    base = whitespaceSanitized;
+    ext = "";
+  }
+
+  if (whitespaceSanitized.length <= maxLen) {
+    return whitespaceSanitized;
+  }
+
+  const allowedBaseLen = maxLen - ext.length;
+  if (allowedBaseLen <= 0) {
+    return whitespaceSanitized.slice(0, maxLen);
+  }
+
+  const trimmedBase = base.slice(0, allowedBaseLen).replace(/[ ._-]+$/g, "");
+  const safeBase = trimmedBase || "meal_photo";
+  return `${safeBase}${ext}`.slice(0, maxLen);
+};
+
 const buildMealPhotoName = (entry: DropboxFileEntry): string => {
   const keys = buildDropboxCandidateKeys(entry);
-  const parts = [entry.name];
+  const metadataParts: string[] = [];
   if (keys.fileId) {
-    parts.push(`[dropbox-id:${keys.fileId}]`);
+    metadataParts.push(`[dropbox-id:${keys.fileId}]`);
   }
   if (keys.path) {
     // Backward compatibility: keep name-embedded metadata so old entries remain comparable.
-    parts.push(`[dropbox-path:${keys.path}]`);
+    metadataParts.push(`[dropbox-path:${keys.path}]`);
   }
-  return parts.join(" ");
+
+  if (metadataParts.length === 0) {
+    return sanitizeNotionFileName(entry.name);
+  }
+
+  const metadataSuffix = ` ${metadataParts.join(" ")}`;
+  const allowedNameLen = NOTION_FILE_NAME_MAX_LEN - metadataSuffix.length;
+  if (allowedNameLen <= 0) {
+    return sanitizeNotionFileName(`${entry.name}${metadataSuffix}`);
+  }
+
+  const safeName = sanitizeNotionFileName(entry.name, allowedNameLen);
+  return `${safeName}${metadataSuffix}`;
 };
 
 const extractMealPhotosExistingState = (
