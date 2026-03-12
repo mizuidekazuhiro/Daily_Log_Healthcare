@@ -476,10 +476,63 @@ const jstFormatter = new Intl.DateTimeFormat("en-CA", {
 
 const formatJstDate = (date: Date): string => jstFormatter.format(date);
 
-const getYesterdayJstDate = (): string => {
+const parseYmd = (value: string): { year: number; month: number; day: number } | null => {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+
+  return { year, month, day };
+};
+
+const getMealPhotoWindowByExecutionDateJst = (
+  requestedExecutionDate?: string,
+): { targetDate: string; windowStartJst: Date; windowEndJst: Date } => {
   const now = new Date();
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  return formatJstDate(yesterday);
+  const executionDate = requestedExecutionDate?.trim() || formatJstDate(now);
+  const executionYmd = parseYmd(executionDate);
+
+  if (!executionYmd) {
+    const fallbackExecutionDate = formatJstDate(now);
+    const fallbackExecutionYmd = parseYmd(fallbackExecutionDate) as {
+      year: number;
+      month: number;
+      day: number;
+    };
+    const windowEndJst = new Date(
+      `${fallbackExecutionDate}T05:00:00+09:00`,
+    );
+    const windowStartJst = new Date(windowEndJst.getTime() - 24 * 60 * 60 * 1000);
+    const targetDate = formatJstDate(windowStartJst);
+    console.warn("MEAL_PHOTOS_INVALID_EXECUTION_DATE", {
+      requestId: currentRequestId,
+      requestedExecutionDate,
+      fallbackExecutionDate,
+    });
+    return { targetDate, windowStartJst, windowEndJst };
+  }
+
+  const executionDateUtc = Date.UTC(
+    executionYmd.year,
+    executionYmd.month - 1,
+    executionYmd.day,
+  );
+  const prevDate = new Date(executionDateUtc - 24 * 60 * 60 * 1000);
+  const prevDateYmd = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    prevDate.getUTCDate(),
+  ).padStart(2, "0")}`;
+
+  const windowStartJst = new Date(`${prevDateYmd}T05:00:00+09:00`);
+  const windowEndJst = new Date(`${executionDate}T05:00:00+09:00`);
+  const targetDate = prevDateYmd;
+  return { targetDate, windowStartJst, windowEndJst };
 };
 
 const imageExtensions = new Set([
@@ -1060,12 +1113,16 @@ const runMealPhotos = async (
   requestedDate?: string,
 ): Promise<MealPhotoRunResult> => {
   const now = new Date();
-  const targetDate = requestedDate?.trim() || getYesterdayJstDate();
+  const { targetDate, windowStartJst, windowEndJst } =
+    getMealPhotoWindowByExecutionDateJst(requestedDate);
   // LOG: Date calculation with requestId
   console.log("MEAL_PHOTOS_DATE_CALC", {
     requestId: currentRequestId,
     now: now.toISOString(),
+    execution_date: requestedDate?.trim() || formatJstDate(now),
     target_date: targetDate,
+    window_start_jst: windowStartJst.toISOString(),
+    window_end_jst: windowEndJst.toISOString(),
   });
 
   const missingEnv: string[] = [];
@@ -1100,8 +1157,11 @@ const runMealPhotos = async (
     if (!isImageFile(entry.name)) {
       return false;
     }
-    const modifiedDate = new Date(entry.server_modified);
-    return formatJstDate(modifiedDate) === targetDate;
+    const modifiedAtUtc = new Date(entry.server_modified);
+    if (Number.isNaN(modifiedAtUtc.getTime())) {
+      return false;
+    }
+    return modifiedAtUtc >= windowStartJst && modifiedAtUtc < windowEndJst;
   });
 
   console.log("MEAL_PHOTOS_COUNT", {
