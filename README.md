@@ -78,10 +78,10 @@ npm install
 | 新規 | `Readiness BPM` | number | `readiness_bpm` | 任意 |
 | 新規 | `Baseline HRV` | number | `baseline_hrv` | 任意 |
 | 新規 | `Baseline Waking BPM` | number | `baseline_waking_bpm` | 任意 |
-| 新規 | `Sleep Percent` | number | `sleep_percent` | 任意 |
-| 新規 | `REM Percent` | number | `rem_percent` | 任意 |
-| 新規 | `Deep Percent` | number | `deep_percent` | 任意 |
-| 新規 | `Heart Rate Percent` | number | `heart_rate_percent` | 任意 |
+| 新規 | `Sleep Percent` | number | `sleep_percent` | 任意。Notion では Number + Percent 表示を推奨。API で 135 を受けると保存時に 1.35 へ変換 |
+| 新規 | `REM Percent` | number | `rem_percent` | 任意。Notion では Number + Percent 表示を推奨。API で 204 を受けると保存時に 2.04 へ変換 |
+| 新規 | `Deep Percent` | number | `deep_percent` | 任意。Notion では Number + Percent 表示を推奨。API で 110 を受けると保存時に 1.10 へ変換 |
+| 新規 | `Heart Rate Percent` | number | `heart_rate_percent` | 任意。Notion では Number + Percent 表示を推奨。API で 153 を受けると保存時に 1.53 へ変換 |
 | 新規 | `Readiness Label` | rich_text | `readiness_label` | 任意。APIでは string を受け取り、Worker が rich_text に変換して保存 |
 
 > `Sleep Source` は select 型、`Readiness Label` は rich_text 型で作成してください。`readiness_label` は API では string で受け取り、Worker が Notion の rich_text 配列へ変換して保存します。
@@ -91,8 +91,9 @@ npm install
 1. 既存の Daily Log Database を開く
 2. 上の「推奨Notion列一覧」に従って不足列を追加する
 3. Number 型の列は数値、Date 型の列は日付、Select 型の列は候補を追加し、`Readiness Label` は rich_text 型で作成する
-4. `sleep_start` / `sleep_end` を使う場合は ISO 8601 文字列を送る
-5. 新規項目を送らない既存クライアントでも、既存列だけで従来どおり保存できる
+4. `Sleep Percent` / `REM Percent` / `Deep Percent` / `Heart Rate Percent` は Notion 側で **Number + Percent 表示** にすることを推奨
+5. `sleep_start` / `sleep_end` を使う場合は ISO 8601 文字列を送る
+6. 新規項目を送らない既存クライアントでも、既存列だけで従来どおり保存できる
 
 ### 4. Notion Integration を作成して Database と接続する
 
@@ -181,6 +182,7 @@ npm run deploy
 - 既存ページがあれば PATCH、なければ CREATE
 - `null` / `undefined` / 空文字の項目は Notion に書き込まない
 - 数値項目が未送信、`null`、`undefined`、空文字、parse 不能な場合はその項目だけを無視して全体処理は継続する
+- `sleep_percent` / `rem_percent` / `deep_percent` / `heart_rate_percent` は API では 135 のような値を受け取り、Notion 保存直前に `/100` して Number プロパティへ保存する
 - 追加項目はすべて任意で、欠けていても 4xx にしない
 - 受信 payload に含まれている値だけを保存し、欠けている値は単にスキップする
 - `readiness_label` は空でない場合のみ `Readiness Label` に `{ rich_text: [{ type: "text", text: { content } }] }` 形式で保存する
@@ -213,10 +215,10 @@ npm run deploy
 | `readiness_bpm` | `Readiness BPM` | number | 任意 |
 | `baseline_hrv` | `Baseline HRV` | number | 任意 |
 | `baseline_waking_bpm` | `Baseline Waking BPM` | number | 任意 |
-| `sleep_percent` | `Sleep Percent` | number | 任意 |
-| `rem_percent` | `REM Percent` | number | 任意 |
-| `deep_percent` | `Deep Percent` | number | 任意 |
-| `heart_rate_percent` | `Heart Rate Percent` | number | 任意 |
+| `sleep_percent` | `Sleep Percent` | number | 任意（API で 135 を受けたら保存時は 1.35） |
+| `rem_percent` | `REM Percent` | number | 任意（API で 204 を受けたら保存時は 2.04） |
+| `deep_percent` | `Deep Percent` | number | 任意（API で 110 を受けたら保存時は 1.10） |
+| `heart_rate_percent` | `Heart Rate Percent` | number | 任意（API で 153 を受けたら保存時は 1.53） |
 | `readiness_label` | `Readiness Label` | rich_text | 任意（stringで受け取り、内部で rich_text に変換） |
 
 ### 送信JSON例（フル）
@@ -246,6 +248,31 @@ npm run deploy
 }
 ```
 
+### %項目の保存時変換
+
+`Sleep Percent` / `REM Percent` / `Deep Percent` / `Heart Rate Percent` は Notion では **Number プロパティ** として保存し、表示形式は **Percent** を推奨します。API では従来どおり 135 のような整数値または数値文字列を受け取り、Worker が Notion 保存直前に `/100` して保存します。
+
+送信JSON:
+
+```json
+{
+  "sleep_percent": 135,
+  "rem_percent": 204,
+  "deep_percent": 110,
+  "heart_rate_percent": 153
+}
+```
+
+Notion 保存値:
+
+- `Sleep Percent`: `1.35`
+- `REM Percent`: `2.04`
+- `Deep Percent`: `1.10`
+- `Heart Rate Percent`: `1.53`
+
+Notion 側で Percent 表示にすると、`135%` / `204%` / `110%` / `153%` のように表示できます。
+
+
 ### 送信JSON例（部分送信）
 
 ```json
@@ -258,6 +285,8 @@ npm run deploy
 ```
 
 > 追加項目の一部しか無くても成功します。追加項目を一切送らない既存クライアントも従来どおり成功します。
+
+> `%` 系4項目が未送信でもリクエスト全体は成功します。空文字・`null`・`undefined`・parse 不能な値はその項目だけをスキップし、保存可能な項目だけで処理を継続します。
 
 ### curl 例
 
