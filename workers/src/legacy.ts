@@ -22,6 +22,13 @@ type Payload = {
   fat?: number | null;
   carb?: number | null;
   kcal?: number | null;
+  sleep_start?: string | null;
+  sleep_end?: string | null;
+  sleep_duration_min?: number | null;
+  sleep_score?: number | null;
+  sleep_awakenings?: number | null;
+  in_bed_duration_min?: number | null;
+  sleep_source?: string | null;
   source?: string | null;
 };
 
@@ -87,17 +94,164 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
-const validatePayload = (payload: Payload): string | null => {
-  const numericKeys = [
-    "weight",
-    "protein",
-    "fat",
-    "carb",
-    "kcal",
-  ] as const;
+const numericPayloadKeys = [
+  "weight",
+  "protein",
+  "fat",
+  "carb",
+  "kcal",
+  "sleep_duration_min",
+  "sleep_score",
+  "sleep_awakenings",
+  "in_bed_duration_min",
+] as const;
 
-  for (const key of numericKeys) {
-    if (!Object.prototype.hasOwnProperty.call(payload, key)) {
+const stringPayloadKeys = [
+  "source",
+  "sleep_start",
+  "sleep_end",
+  "sleep_source",
+] as const;
+
+const hasOwn = (payload: Payload, key: keyof Payload): boolean =>
+  Object.prototype.hasOwnProperty.call(payload, key);
+
+const isNullishOrEmptyString = (value: unknown): boolean =>
+  value === null || value === undefined || value === "";
+
+const assignNumberProp = (
+  props: Record<string, unknown>,
+  propName: string,
+  value: number | null | undefined,
+): void => {
+  if (value === null || value === undefined) {
+    return;
+  }
+  props[propName] = { number: value };
+};
+
+const assignDateProp = (
+  props: Record<string, unknown>,
+  propName: string,
+  value: string | null | undefined,
+): void => {
+  if (value === null || value === undefined) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  props[propName] = { date: { start: trimmed } };
+};
+
+const assignSelectProp = (
+  props: Record<string, unknown>,
+  propName: string,
+  value: string | null | undefined,
+): void => {
+  if (value === null || value === undefined) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  props[propName] = { select: { name: trimmed } };
+};
+
+const unwrapShortcutDeep = (value: any, maxDepth = 6): any => {
+  let current = value;
+  let depth = 0;
+  while (
+    depth < maxDepth &&
+    current &&
+    typeof current === "object" &&
+    !Array.isArray(current) &&
+    Object.prototype.hasOwnProperty.call(current, "")
+  ) {
+    current = (current as { "": any })[""];
+    depth += 1;
+  }
+  return current;
+};
+
+const toNumberOrNull = (value: any): number | null => {
+  const unwrapped = unwrapShortcutDeep(value);
+  if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
+    return null;
+  }
+  if (typeof unwrapped === "number") {
+    return Number.isFinite(unwrapped) ? unwrapped : null;
+  }
+  if (typeof unwrapped === "string") {
+    const trimmed = unwrapped.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const normalized = trimmed.replace(/,/g, "");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const toTrimmedStringOrNull = (value: any): string | null => {
+  const unwrapped = unwrapShortcutDeep(value);
+  if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
+    return null;
+  }
+  if (typeof unwrapped !== "string") {
+    return null;
+  }
+  const trimmed = unwrapped.trim();
+  return trimmed || null;
+};
+
+const normalizeHealthDailyPayload = (rawPayload: Payload): Payload => {
+  let payload = rawPayload;
+  const raw: any = rawPayload as any;
+  if (raw && typeof raw === "object") {
+    payload = unwrapShortcutDeep(raw) as Payload;
+  }
+
+  for (const key of numericPayloadKeys) {
+    (payload as any)[key] = toNumberOrNull((payload as any)[key]);
+  }
+
+  for (const key of stringPayloadKeys) {
+    (payload as any)[key] = toTrimmedStringOrNull((payload as any)[key]);
+  }
+
+  return payload;
+};
+
+const buildValidationDebugInfo = (payload: Payload) => {
+  const receivedTypes = Object.fromEntries(
+    numericPayloadKeys.map((key) => {
+      const value = payload[key];
+      if (value === null) {
+        return [key, "null"];
+      }
+      if (Array.isArray(value)) {
+        return [key, "array"];
+      }
+      return [key, typeof value];
+    }),
+  );
+  const receivedValues = Object.fromEntries(
+    numericPayloadKeys.map((key) => [key, payload[key]]),
+  );
+
+  return {
+    receivedTypes,
+    receivedValues,
+  };
+};
+
+const validatePayload = (payload: Payload): string | null => {
+  for (const key of numericPayloadKeys) {
+    if (!hasOwn(payload, key)) {
       continue;
     }
     const value = payload[key];
@@ -109,13 +263,16 @@ const validatePayload = (payload: Payload): string | null => {
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, "source")) {
-    const value = payload.source;
-    if (value === null || value === undefined || value === "") {
-      return null;
+  for (const key of stringPayloadKeys) {
+    if (!hasOwn(payload, key)) {
+      continue;
+    }
+    const value = payload[key];
+    if (isNullishOrEmptyString(value)) {
+      continue;
     }
     if (typeof value !== "string") {
-      return "source must be a string";
+      return `${key} must be a string`;
     }
   }
 
@@ -125,27 +282,19 @@ const validatePayload = (payload: Payload): string | null => {
 const buildPartialProps = (payload: Payload): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
 
-  if (payload.weight !== null && payload.weight !== undefined) {
-    props["Weight"] = { number: payload.weight };
-  }
-  if (payload.protein !== null && payload.protein !== undefined) {
-    props["Protein"] = { number: payload.protein };
-  }
-  if (payload.fat !== null && payload.fat !== undefined) {
-    props["Fat"] = { number: payload.fat };
-  }
-  if (payload.carb !== null && payload.carb !== undefined) {
-    props["Carb"] = { number: payload.carb };
-  }
-  if (payload.kcal !== null && payload.kcal !== undefined) {
-    props["Kcal"] = { number: payload.kcal };
-  }
-  if (payload.source !== null && payload.source !== undefined) {
-    const trimmed = payload.source.trim();
-    if (trimmed) {
-      props["Source"] = { select: { name: trimmed } };
-    }
-  }
+  assignNumberProp(props, "Weight", payload.weight);
+  assignNumberProp(props, "Protein", payload.protein);
+  assignNumberProp(props, "Fat", payload.fat);
+  assignNumberProp(props, "Carb", payload.carb);
+  assignNumberProp(props, "Kcal", payload.kcal);
+  assignDateProp(props, "Sleep Start", payload.sleep_start);
+  assignDateProp(props, "Sleep End", payload.sleep_end);
+  assignNumberProp(props, "Sleep Duration Min", payload.sleep_duration_min);
+  assignNumberProp(props, "Sleep Score", payload.sleep_score);
+  assignNumberProp(props, "Sleep Awakenings", payload.sleep_awakenings);
+  assignNumberProp(props, "In Bed Duration Min", payload.in_bed_duration_min);
+  assignSelectProp(props, "Sleep Source", payload.sleep_source);
+  assignSelectProp(props, "Source", payload.source);
 
   return props;
 };
@@ -1327,54 +1476,7 @@ const handleHealthDaily = async (
 
   let payload: Payload;
   try {
-    payload = (await request.json()) as Payload;
-    // --- normalize Shortcuts payload ---
-    const unwrapShortcutDeep = (value: any, maxDepth = 6): any => {
-      let current = value;
-      let depth = 0;
-      while (
-        depth < maxDepth &&
-        current &&
-        typeof current === "object" &&
-        !Array.isArray(current) &&
-        Object.prototype.hasOwnProperty.call(current, "")
-      ) {
-        current = (current as { "": any })[""];
-        depth += 1;
-      }
-      return current;
-    };
-
-    const raw: any = payload as any;
-    if (raw && typeof raw === "object") {
-      payload = unwrapShortcutDeep(raw) as Payload;
-    }
-
-    const toNumberOrNull = (value: any): number | null => {
-      const unwrapped = unwrapShortcutDeep(value);
-      if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
-        return null;
-      }
-      if (typeof unwrapped === "number") {
-        return Number.isFinite(unwrapped) ? unwrapped : null;
-      }
-      if (typeof unwrapped === "string") {
-        const trimmed = unwrapped.trim();
-        if (!trimmed) {
-          return null;
-        }
-        const normalized = trimmed.replace(/,/g, "");
-        const parsed = Number(normalized);
-        return Number.isFinite(parsed) ? parsed : null;
-      }
-      return null;
-    };
-
-    (payload as any).weight = toNumberOrNull((payload as any).weight);
-    (payload as any).protein = toNumberOrNull((payload as any).protein);
-    (payload as any).fat = toNumberOrNull((payload as any).fat);
-    (payload as any).carb = toNumberOrNull((payload as any).carb);
-    (payload as any).kcal = toNumberOrNull((payload as any).kcal);
+    payload = normalizeHealthDailyPayload((await request.json()) as Payload);
   } catch (error) {
     return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
   }
@@ -1385,22 +1487,7 @@ const handleHealthDaily = async (
 
   const validationError = validatePayload(payload);
   if (validationError) {
-    const numericKeys = ["weight", "protein", "fat", "carb", "kcal"] as const;
-    const receivedTypes = Object.fromEntries(
-      numericKeys.map((key) => {
-        const value = payload[key];
-        if (value === null) {
-          return [key, "null"];
-        }
-        if (Array.isArray(value)) {
-          return [key, "array"];
-        }
-        return [key, typeof value];
-      }),
-    );
-    const receivedValues = Object.fromEntries(
-      numericKeys.map((key) => [key, payload[key]]),
-    );
+    const { receivedTypes, receivedValues } = buildValidationDebugInfo(payload);
     return jsonResponse(
       {
         ok: false,
