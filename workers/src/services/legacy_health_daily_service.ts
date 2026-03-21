@@ -89,10 +89,10 @@ const NUMERIC_FIELDS = [
   { payloadKey: "readiness_bpm", notionProp: HEALTH_PROP.readinessBpm },
   { payloadKey: "baseline_hrv", notionProp: HEALTH_PROP.baselineHrv },
   { payloadKey: "baseline_waking_bpm", notionProp: HEALTH_PROP.baselineWakingBpm },
-  { payloadKey: "sleep_percent", notionProp: HEALTH_PROP.sleepPercent },
-  { payloadKey: "rem_percent", notionProp: HEALTH_PROP.remPercent },
-  { payloadKey: "deep_percent", notionProp: HEALTH_PROP.deepPercent },
-  { payloadKey: "heart_rate_percent", notionProp: HEALTH_PROP.heartRatePercent },
+  { payloadKey: "sleep_percent", notionProp: HEALTH_PROP.sleepPercent, scalePercent: true },
+  { payloadKey: "rem_percent", notionProp: HEALTH_PROP.remPercent, scalePercent: true },
+  { payloadKey: "deep_percent", notionProp: HEALTH_PROP.deepPercent, scalePercent: true },
+  { payloadKey: "heart_rate_percent", notionProp: HEALTH_PROP.heartRatePercent, scalePercent: true },
 ] as const;
 
 const STRING_FIELDS = [
@@ -267,15 +267,27 @@ export const validateHealthPayload = (
   return null;
 };
 
+const scalePercentNumber = (value: number): number | null => {
+  const scaled = value / 100;
+  return Number.isFinite(scaled) ? scaled : null;
+};
+
 const assignNumberProp = (
   props: Record<string, unknown>,
   propName: string,
   value: number | null | undefined,
+  options?: { scalePercent?: boolean },
 ): void => {
   if (value === null || value === undefined) {
     return;
   }
-  props[propName] = { number: value };
+
+  const normalizedValue = options?.scalePercent ? scalePercentNumber(value) : value;
+  if (normalizedValue === null) {
+    return;
+  }
+
+  props[propName] = { number: normalizedValue };
 };
 
 const assignDateProp = (
@@ -337,8 +349,8 @@ export const buildHealthPartialProps = (
 ): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
 
-  for (const { payloadKey, notionProp } of NUMERIC_FIELDS) {
-    assignNumberProp(props, notionProp, payload[payloadKey]);
+  for (const { payloadKey, notionProp, scalePercent } of NUMERIC_FIELDS) {
+    assignNumberProp(props, notionProp, payload[payloadKey], { scalePercent });
   }
 
   for (const { payloadKey, notionProp } of DATE_FIELDS) {
