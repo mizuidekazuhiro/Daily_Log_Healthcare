@@ -14,6 +14,19 @@ export type LegacyHealthPayload = {
   sleep_awakenings?: number | null;
   in_bed_duration_min?: number | null;
   sleep_source?: string | null;
+  rem_duration_min?: number | null;
+  deep_duration_min?: number | null;
+  sleep_heart_rate?: number | null;
+  readiness_stars?: number | null;
+  readiness_hrv?: number | null;
+  readiness_bpm?: number | null;
+  baseline_hrv?: number | null;
+  baseline_waking_bpm?: number | null;
+  sleep_percent?: number | null;
+  rem_percent?: number | null;
+  deep_percent?: number | null;
+  heart_rate_percent?: number | null;
+  readiness_label?: string | null;
   source?: string | null;
 };
 
@@ -43,6 +56,19 @@ const HEALTH_PROP = {
   sleepAwakenings: "Sleep Awakenings",
   inBedDurationMin: "In Bed Duration Min",
   sleepSource: "Sleep Source",
+  remDurationMin: "REM Duration Min",
+  deepDurationMin: "Deep Duration Min",
+  sleepHeartRate: "Sleep Heart Rate",
+  readinessStars: "Readiness Stars",
+  readinessHrv: "Readiness HRV",
+  readinessBpm: "Readiness BPM",
+  baselineHrv: "Baseline HRV",
+  baselineWakingBpm: "Baseline Waking BPM",
+  sleepPercent: "Sleep Percent",
+  remPercent: "REM Percent",
+  deepPercent: "Deep Percent",
+  heartRatePercent: "Heart Rate Percent",
+  readinessLabel: "Readiness Label",
 } as const;
 
 const NUMERIC_FIELDS = [
@@ -55,11 +81,24 @@ const NUMERIC_FIELDS = [
   { payloadKey: "sleep_score", notionProp: HEALTH_PROP.sleepScore },
   { payloadKey: "sleep_awakenings", notionProp: HEALTH_PROP.sleepAwakenings },
   { payloadKey: "in_bed_duration_min", notionProp: HEALTH_PROP.inBedDurationMin },
+  { payloadKey: "rem_duration_min", notionProp: HEALTH_PROP.remDurationMin },
+  { payloadKey: "deep_duration_min", notionProp: HEALTH_PROP.deepDurationMin },
+  { payloadKey: "sleep_heart_rate", notionProp: HEALTH_PROP.sleepHeartRate },
+  { payloadKey: "readiness_stars", notionProp: HEALTH_PROP.readinessStars },
+  { payloadKey: "readiness_hrv", notionProp: HEALTH_PROP.readinessHrv },
+  { payloadKey: "readiness_bpm", notionProp: HEALTH_PROP.readinessBpm },
+  { payloadKey: "baseline_hrv", notionProp: HEALTH_PROP.baselineHrv },
+  { payloadKey: "baseline_waking_bpm", notionProp: HEALTH_PROP.baselineWakingBpm },
+  { payloadKey: "sleep_percent", notionProp: HEALTH_PROP.sleepPercent },
+  { payloadKey: "rem_percent", notionProp: HEALTH_PROP.remPercent },
+  { payloadKey: "deep_percent", notionProp: HEALTH_PROP.deepPercent },
+  { payloadKey: "heart_rate_percent", notionProp: HEALTH_PROP.heartRatePercent },
 ] as const;
 
 const STRING_FIELDS = [
   { payloadKey: "source", notionProp: HEALTH_PROP.source, notionType: "select" },
   { payloadKey: "sleep_source", notionProp: HEALTH_PROP.sleepSource, notionType: "select" },
+  { payloadKey: "readiness_label", notionProp: HEALTH_PROP.readinessLabel, notionType: "select" },
 ] as const;
 
 const DATE_FIELDS = [
@@ -75,6 +114,16 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 const isNullishOrEmptyString = (value: unknown): boolean =>
   value === null || value === undefined || value === "";
+
+const isIso8601DateTimeString = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+  if (!isoDateTimePattern.test(trimmed)) {
+    return false;
+  }
+  return !Number.isNaN(Date.parse(trimmed));
+};
 
 const unwrapShortcutDeep = (value: any, maxDepth = 6): any => {
   let current = value;
@@ -186,7 +235,7 @@ export const validateHealthPayload = (
     }
   }
 
-  for (const { payloadKey } of [...STRING_FIELDS, ...DATE_FIELDS]) {
+  for (const { payloadKey } of STRING_FIELDS) {
     if (!hasOwn(payload, payloadKey)) {
       continue;
     }
@@ -196,6 +245,22 @@ export const validateHealthPayload = (
     }
     if (typeof value !== "string") {
       return `${payloadKey} must be a string`;
+    }
+  }
+
+  for (const { payloadKey } of DATE_FIELDS) {
+    if (!hasOwn(payload, payloadKey)) {
+      continue;
+    }
+    const value = payload[payloadKey];
+    if (isNullishOrEmptyString(value)) {
+      continue;
+    }
+    if (typeof value !== "string") {
+      return `${payloadKey} must be a string`;
+    }
+    if (!isIso8601DateTimeString(value)) {
+      return `${payloadKey} must be an ISO 8601 datetime string`;
     }
   }
 
