@@ -37,7 +37,14 @@ test('succeeds when some new optional fields are sent', () => {
   assert.deepEqual(buildHealthPartialProps(payload), {
     'REM Duration Min': { number: 165 },
     'Sleep Heart Rate': { number: 71 },
-    'Readiness Label': { select: { name: 'OK' } },
+    'Readiness Label': {
+      rich_text: [
+        {
+          type: 'text',
+          text: { content: 'OK' },
+        },
+      ],
+    },
   });
 });
 
@@ -62,7 +69,14 @@ test('succeeds when all new optional fields are sent', () => {
   assert.equal(validateHealthPayload(payload), null);
   const props = buildHealthPartialProps(payload);
   assert.equal(Object.keys(props).length, 13);
-  assert.deepEqual(props['Readiness Label'], { select: { name: 'OK' } });
+  assert.deepEqual(props['Readiness Label'], {
+    rich_text: [
+      {
+        type: 'text',
+        text: { content: 'OK' },
+      },
+    ],
+  });
   assert.deepEqual(props['Heart Rate Percent'], { number: 153 });
 });
 
