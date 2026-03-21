@@ -1,8 +1,18 @@
 import { requireBearerAuth } from "./utils/auth";
+import {
+  buildValidationDebugInfo,
+  normalizeHealthPayload,
+  upsertHealthDailyPage,
+  validateHealthPayload,
+  type LegacyHealthPayload,
+} from "./services/legacy_health_daily_service";
 
 export interface Env {
   NOTION_TOKEN: string;
-  DAILY_LOG_DB_ID: string;
+  DAILY_LOG_DB_ID?: string;
+  HEALTH_DB_ID?: string;
+  HEALTH_DATE_PROP?: string;
+  HEALTH_TITLE_PROP?: string;
   HEALTH_API_KEY: string;
   DROPBOX_CLIENT_ID?: string;
   DROPBOX_CLIENT_SECRET?: string;
@@ -15,22 +25,7 @@ export interface Env {
   DROPBOX_FOLDER_PATH?: string;
 }
 
-type Payload = {
-  date?: string | null;
-  weight?: number | null;
-  protein?: number | null;
-  fat?: number | null;
-  carb?: number | null;
-  kcal?: number | null;
-  sleep_start?: string | null;
-  sleep_end?: string | null;
-  sleep_duration_min?: number | null;
-  sleep_score?: number | null;
-  sleep_awakenings?: number | null;
-  in_bed_duration_min?: number | null;
-  sleep_source?: string | null;
-  source?: string | null;
-};
+type Payload = LegacyHealthPayload;
 
 type DropboxFileEntry = {
   ".tag": "file";
@@ -90,214 +85,6 @@ const jsonResponse = (body: unknown, status = 200): Response =>
       "Content-Type": "application/json",
     },
   });
-
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
-const numericPayloadKeys = [
-  "weight",
-  "protein",
-  "fat",
-  "carb",
-  "kcal",
-  "sleep_duration_min",
-  "sleep_score",
-  "sleep_awakenings",
-  "in_bed_duration_min",
-] as const;
-
-const stringPayloadKeys = [
-  "source",
-  "sleep_start",
-  "sleep_end",
-  "sleep_source",
-] as const;
-
-const hasOwn = (payload: Payload, key: keyof Payload): boolean =>
-  Object.prototype.hasOwnProperty.call(payload, key);
-
-const isNullishOrEmptyString = (value: unknown): boolean =>
-  value === null || value === undefined || value === "";
-
-const assignNumberProp = (
-  props: Record<string, unknown>,
-  propName: string,
-  value: number | null | undefined,
-): void => {
-  if (value === null || value === undefined) {
-    return;
-  }
-  props[propName] = { number: value };
-};
-
-const assignDateProp = (
-  props: Record<string, unknown>,
-  propName: string,
-  value: string | null | undefined,
-): void => {
-  if (value === null || value === undefined) {
-    return;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return;
-  }
-  props[propName] = { date: { start: trimmed } };
-};
-
-const assignSelectProp = (
-  props: Record<string, unknown>,
-  propName: string,
-  value: string | null | undefined,
-): void => {
-  if (value === null || value === undefined) {
-    return;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return;
-  }
-  props[propName] = { select: { name: trimmed } };
-};
-
-const unwrapShortcutDeep = (value: any, maxDepth = 6): any => {
-  let current = value;
-  let depth = 0;
-  while (
-    depth < maxDepth &&
-    current &&
-    typeof current === "object" &&
-    !Array.isArray(current) &&
-    Object.prototype.hasOwnProperty.call(current, "")
-  ) {
-    current = (current as { "": any })[""];
-    depth += 1;
-  }
-  return current;
-};
-
-const toNumberOrNull = (value: any): number | null => {
-  const unwrapped = unwrapShortcutDeep(value);
-  if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
-    return null;
-  }
-  if (typeof unwrapped === "number") {
-    return Number.isFinite(unwrapped) ? unwrapped : null;
-  }
-  if (typeof unwrapped === "string") {
-    const trimmed = unwrapped.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const normalized = trimmed.replace(/,/g, "");
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const toTrimmedStringOrNull = (value: any): string | null => {
-  const unwrapped = unwrapShortcutDeep(value);
-  if (unwrapped === "" || unwrapped === null || unwrapped === undefined) {
-    return null;
-  }
-  if (typeof unwrapped !== "string") {
-    return null;
-  }
-  const trimmed = unwrapped.trim();
-  return trimmed || null;
-};
-
-const normalizeHealthDailyPayload = (rawPayload: Payload): Payload => {
-  let payload = rawPayload;
-  const raw: any = rawPayload as any;
-  if (raw && typeof raw === "object") {
-    payload = unwrapShortcutDeep(raw) as Payload;
-  }
-
-  for (const key of numericPayloadKeys) {
-    (payload as any)[key] = toNumberOrNull((payload as any)[key]);
-  }
-
-  for (const key of stringPayloadKeys) {
-    (payload as any)[key] = toTrimmedStringOrNull((payload as any)[key]);
-  }
-
-  return payload;
-};
-
-const buildValidationDebugInfo = (payload: Payload) => {
-  const receivedTypes = Object.fromEntries(
-    numericPayloadKeys.map((key) => {
-      const value = payload[key];
-      if (value === null) {
-        return [key, "null"];
-      }
-      if (Array.isArray(value)) {
-        return [key, "array"];
-      }
-      return [key, typeof value];
-    }),
-  );
-  const receivedValues = Object.fromEntries(
-    numericPayloadKeys.map((key) => [key, payload[key]]),
-  );
-
-  return {
-    receivedTypes,
-    receivedValues,
-  };
-};
-
-const validatePayload = (payload: Payload): string | null => {
-  for (const key of numericPayloadKeys) {
-    if (!hasOwn(payload, key)) {
-      continue;
-    }
-    const value = payload[key];
-    if (value === null || value === undefined) {
-      continue;
-    }
-    if (!isFiniteNumber(value)) {
-      return `${key} must be a finite number`;
-    }
-  }
-
-  for (const key of stringPayloadKeys) {
-    if (!hasOwn(payload, key)) {
-      continue;
-    }
-    const value = payload[key];
-    if (isNullishOrEmptyString(value)) {
-      continue;
-    }
-    if (typeof value !== "string") {
-      return `${key} must be a string`;
-    }
-  }
-
-  return null;
-};
-
-const buildPartialProps = (payload: Payload): Record<string, unknown> => {
-  const props: Record<string, unknown> = {};
-
-  assignNumberProp(props, "Weight", payload.weight);
-  assignNumberProp(props, "Protein", payload.protein);
-  assignNumberProp(props, "Fat", payload.fat);
-  assignNumberProp(props, "Carb", payload.carb);
-  assignNumberProp(props, "Kcal", payload.kcal);
-  assignDateProp(props, "Sleep Start", payload.sleep_start);
-  assignDateProp(props, "Sleep End", payload.sleep_end);
-  assignNumberProp(props, "Sleep Duration Min", payload.sleep_duration_min);
-  assignNumberProp(props, "Sleep Score", payload.sleep_score);
-  assignNumberProp(props, "Sleep Awakenings", payload.sleep_awakenings);
-  assignNumberProp(props, "In Bed Duration Min", payload.in_bed_duration_min);
-  assignSelectProp(props, "Sleep Source", payload.sleep_source);
-  assignSelectProp(props, "Source", payload.source);
-
-  return props;
-};
 
 const notionRequest = async (
   url: string,
@@ -1476,7 +1263,7 @@ const handleHealthDaily = async (
 
   let payload: Payload;
   try {
-    payload = normalizeHealthDailyPayload((await request.json()) as Payload);
+    payload = normalizeHealthPayload((await request.json()) as Payload);
   } catch (error) {
     return jsonResponse({ ok: false, error: "Invalid JSON" }, 400);
   }
@@ -1485,7 +1272,7 @@ const handleHealthDaily = async (
     return jsonResponse({ ok: false, error: "date is required" }, 400);
   }
 
-  const validationError = validatePayload(payload);
+  const validationError = validateHealthPayload(payload);
   if (validationError) {
     const { receivedTypes, receivedValues } = buildValidationDebugInfo(payload);
     return jsonResponse(
@@ -1499,106 +1286,13 @@ const handleHealthDaily = async (
     );
   }
 
-  const date = payload.date.trim();
-  const partialProps = buildPartialProps(payload);
+  const upsertResult = await upsertHealthDailyPage(env, payload, notionRequest);
 
-  const queryBody = {
-    filter: {
-      property: "Date",
-      date: {
-        equals: date,
-      },
-    },
-    page_size: 1,
-  };
-
-  const queryResult = await notionRequest(
-    `https://api.notion.com/v1/databases/${env.DAILY_LOG_DB_ID}/query`,
-    {
-      method: "POST",
-      body: JSON.stringify(queryBody),
-    },
-    env.NOTION_TOKEN,
-  );
-
-  if (!queryResult.ok) {
-    return jsonResponse(
-      {
-        ok: false,
-        error: "Notion API error",
-        status: queryResult.status,
-        detail: queryResult.text,
-      },
-      502,
-    );
+  if (!upsertResult.ok) {
+    return jsonResponse(upsertResult.body, upsertResult.status);
   }
 
-  const results = queryResult.json.results as Array<{ id: string }>;
-
-  if (results.length > 0) {
-    if (Object.keys(partialProps).length === 0) {
-      return jsonResponse({ ok: true, action: "updated", date });
-    }
-
-    const updateResult = await notionRequest(
-      `https://api.notion.com/v1/pages/${results[0].id}`,
-      {
-        method: "PATCH",
-        body: JSON.stringify({ properties: partialProps }),
-      },
-      env.NOTION_TOKEN,
-    );
-
-    if (!updateResult.ok) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Notion API error",
-          status: updateResult.status,
-          detail: updateResult.text,
-        },
-        502,
-      );
-    }
-
-    return jsonResponse({ ok: true, action: "updated", date });
-  }
-
-  const createProps = {
-    Name: {
-      title: [{ text: { content: `Daily Log | ${date}` } }],
-    },
-    Date: {
-      date: { start: date },
-    },
-    ...partialProps,
-  };
-
-  const createResult = await notionRequest(
-    "https://api.notion.com/v1/pages",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        parent: { database_id: env.DAILY_LOG_DB_ID },
-        properties: createProps,
-      }),
-    },
-    env.NOTION_TOKEN,
-  );
-
-  if (!createResult.ok) {
-    return jsonResponse(
-      {
-        ok: false,
-        error: "Notion API error",
-        status: createResult.status,
-        detail: createResult.text,
-      },
-      502,
-    );
-  }
-
-  return jsonResponse({ ok: true, action: "created", date });
+  return jsonResponse(upsertResult);
 };
 
 const handleMealPhotosRun = async (
