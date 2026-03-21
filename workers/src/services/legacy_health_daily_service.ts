@@ -98,7 +98,7 @@ const NUMERIC_FIELDS = [
 const STRING_FIELDS = [
   { payloadKey: "source", notionProp: HEALTH_PROP.source, notionType: "select" },
   { payloadKey: "sleep_source", notionProp: HEALTH_PROP.sleepSource, notionType: "select" },
-  { payloadKey: "readiness_label", notionProp: HEALTH_PROP.readinessLabel, notionType: "select" },
+  { payloadKey: "readiness_label", notionProp: HEALTH_PROP.readinessLabel, notionType: "rich_text" },
 ] as const;
 
 const DATE_FIELDS = [
@@ -308,6 +308,30 @@ const assignSelectProp = (
   props[propName] = { select: { name: trimmed } };
 };
 
+const assignRichTextProp = (
+  props: Record<string, unknown>,
+  propName: string,
+  value: string | null | undefined,
+): void => {
+  if (value === null || value === undefined) {
+    return;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  props[propName] = {
+    rich_text: [
+      {
+        type: "text",
+        text: {
+          content: String(trimmed),
+        },
+      },
+    ],
+  };
+};
+
 export const buildHealthPartialProps = (
   payload: LegacyHealthPayload,
 ): Record<string, unknown> => {
@@ -324,6 +348,10 @@ export const buildHealthPartialProps = (
   for (const { payloadKey, notionProp, notionType } of STRING_FIELDS) {
     if (notionType === "select") {
       assignSelectProp(props, notionProp, payload[payloadKey]);
+      continue;
+    }
+    if (notionType === "rich_text") {
+      assignRichTextProp(props, notionProp, payload[payloadKey]);
     }
   }
 
