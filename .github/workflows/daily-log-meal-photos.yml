@@ -2,9 +2,14 @@ name: Daily Log Meal Photos
 
 on:
   schedule:
-  # 03:21 JST = 18:21 UTC (previous day)
-  - cron: "21 18 * * *"
+  # 05:21 JST = 20:21 UTC (previous day)
+  - cron: "21 20 * * *"
   workflow_dispatch:
+    inputs:
+      execution_date:
+        description: "Execution date in JST YYYY-MM-DD. Empty = auto"
+        required: false
+        type: string
 
 jobs:
   trigger-meal-photos:
@@ -14,7 +19,10 @@ jobs:
         env:
           MEAL_PHOTOS_ENDPOINT: ${{ secrets.MEAL_PHOTOS_ENDPOINT }}
           HEALTH_API_KEY: ${{ secrets.HEALTH_API_KEY }}
+          EXECUTION_DATE: ${{ github.event.inputs.execution_date }}
         run: |
+          set -euo pipefail
+
           if [ -z "$MEAL_PHOTOS_ENDPOINT" ]; then
             echo "MEAL_PHOTOS_ENDPOINT is not set. Add it in GitHub Secrets." >&2
             exit 1
@@ -25,9 +33,15 @@ jobs:
             exit 1
           fi
 
-          curl -i \
+          BODY="{}"
+          if [ -n "${EXECUTION_DATE:-}" ]; then
+            BODY="{\"execution_date\":\"$EXECUTION_DATE\"}"
+          fi
+
+          echo "Request body: $BODY"
+
+          curl --fail-with-body -i \
             -X POST "$MEAL_PHOTOS_ENDPOINT" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $HEALTH_API_KEY" \
-            -d '{}'
-
+            -d "$BODY"
