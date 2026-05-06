@@ -522,3 +522,14 @@ curl -X POST "https://<your-worker-domain>/api/app-usage/session" \
 - This records app foreground time between open and close, not exact card-review time.
 - iPhone Shortcuts should call this Worker, not Notion API directly.
 - Notion token remains only in Cloudflare Worker secrets.
+
+## Anki App Usage 集計
+
+- `POST /api/app-usage/session` は **App Usage Sessions DB (`APP_USAGE_DB_ID`) に個別セッションを記録するだけ** です。
+- このPOSTでは Daily_Log DB の更新は行いません（`daily_log_updated: false`）。
+- Daily_Log への集計反映（`Anki Minutes` / `Anki Sessions` / `Anki Last Used At`）は Cloudflare Cron により **毎日 03:00 JST** に実行されます。
+- Cloudflare Cron は UTC 基準のため、03:00 JST は `0 18 * * *` です。
+- `DAILY_LOG_DB_ID` は Daily_Log DB 用です。
+- `HEALTH_DB_ID` は Health condition DB 用であり、Anki集計には使用しません。
+- `APP_USAGE_DAILY_LOG_DB_ID` は不要です。
+- 手動リカバリ用エンドポイント: `POST /api/app-usage/aggregate`（通常のiPhone Shortcutsからは呼ばない）。

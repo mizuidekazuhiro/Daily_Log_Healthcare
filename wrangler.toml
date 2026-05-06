@@ -13,3 +13,9 @@ HEALTH_DATE_PROP = "Date"
 HEALTH_TITLE_PROP = "Name"
 MEAL_PHOTOS_FOLDER_PATH = "/2026_meal"
 DROPBOX_CLIENT_ID = "3pa2irxaypyniq5"
+
+[triggers]
+crons = ["0 18 * * *"]
+
+[env.production.triggers]
+crons = ["0 18 * * *"]

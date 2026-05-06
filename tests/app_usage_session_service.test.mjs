@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const svc = await import('../workers/src/services/app_usage_session_pure.ts');
 
-const { normalizeAppUsagePayload, validateAndComputeAppUsage, isIso8601DateTimeString } = svc;
+const { normalizeAppUsagePayload, validateAndComputeAppUsage, isIso8601DateTimeString, getPreviousJstDateFrom } = svc;
 
 const base = {
   app: 'Anki', session_id: 's1', started_at: '2026-05-06T01:00:00+09:00', ended_at: '2026-05-06T01:40:00+09:00', day_start_hour: 3,
@@ -85,4 +85,10 @@ test('aggregation dedupes duplicate Session ID rows and latest edited wins', () 
   assert.equal(agg.minutes, 40);
   assert.equal(agg.sessions, 1);
   assert.equal(agg.last, '2026-05-06T14:00:00+09:00');
+});
+
+
+test('previous JST date helper uses scheduled UTC time correctly', () => {
+  const r = getPreviousJstDateFrom(Date.parse('2026-05-06T18:00:00Z'));
+  assert.equal(r, '2026-05-06');
 });
