@@ -4,6 +4,7 @@ import { handleSupplementIntakesPost } from "./handlers/supplement_intakes_post"
 import { requireBearerAuth } from "./utils/auth";
 import { jsonResponse } from "./utils/http";
 import { handleLegacyRoute } from "./legacy";
+import { handleAppUsageSessionPost } from "./handlers/app_usage_session_post";
 
 export const routeRequest = async (request: Request, env: Env): Promise<Response> => {
   const { pathname } = new URL(request.url);
@@ -18,6 +19,13 @@ export const routeRequest = async (request: Request, env: Env): Promise<Response
     if (request.method !== "POST") return jsonResponse(405, { ok: false, error: "Method Not Allowed" });
     if (!requireBearerAuth(request, env)) return jsonResponse(401, { ok: false, error: "Unauthorized" });
     return handleSupplementIntakesPost(request, env);
+  }
+
+
+  if (pathname === "/api/app-usage/session") {
+    if (request.method !== "POST") return jsonResponse(405, { ok: false, error: "Method Not Allowed" });
+    if (!requireBearerAuth(request, env)) return jsonResponse(401, { ok: false, error: "Unauthorized" });
+    return handleAppUsageSessionPost(request, env);
   }
 
   const legacy = await handleLegacyRoute(request, env as any);
