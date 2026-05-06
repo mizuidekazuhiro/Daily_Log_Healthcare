@@ -1,7 +1,7 @@
 import type { Env } from "../types";
 import { notionFetch, queryDatabaseAll } from "./notion_client";
 import {
-  aggregateAnkiRowsDedupBySessionId,
+  aggregateStudyRowsDedupBySessionId,
   normalizeAppUsagePayload,
   validateAndComputeAppUsage,
   getPreviousJstDateFrom,
@@ -24,7 +24,7 @@ const getAppUsageProps = (env: Env) => ({
   sessionId: prop(env, "APP_USAGE_SESSION_ID_PROPERTY_NAME", "Session ID"),
 });
 
-export const upsertAnkiSession = async (env: Env, normalized: NormalizedAppUsage, computed: any) => {
+export const upsertAppUsageSession = async (env: Env, normalized: NormalizedAppUsage, computed: any) => {
   const appDbId = env.APP_USAGE_DB_ID;
   if (!appDbId) throw new Error("Missing APP_USAGE_DB_ID");
   const appProp = getAppUsageProps(env);
@@ -51,21 +51,21 @@ export const upsertAnkiSession = async (env: Env, normalized: NormalizedAppUsage
   return { upsert_mode };
 };
 
-export const aggregateAnkiUsageForTargetDate = async (env: Env, targetDate: string) => {
+export const aggregateStudyUsageForTargetDate = async (env: Env, targetDate: string) => {
   const appDbId = env.APP_USAGE_DB_ID;
   const dailyDbId = env.DAILY_LOG_DB_ID;
   if (!appDbId) throw new Error("Missing APP_USAGE_DB_ID");
   if (!dailyDbId) throw new Error("Missing DAILY_LOG_DB_ID");
 
   const appProp = getAppUsageProps(env);
-  const rows = await queryDatabaseAll(env, appDbId, { filter: { and: [{ property: appProp.app, select: { equals: "Anki" } }, { property: appProp.targetDate, date: { equals: targetDate } }] } });
-  const aggregate = aggregateAnkiRowsDedupBySessionId(rows, { sessionId: appProp.sessionId, durationMin: appProp.durationMin, endAt: appProp.endAt }, targetDate);
+  const rows = await queryDatabaseAll(env, appDbId, { filter: { property: appProp.targetDate, date: { equals: targetDate } } });
+  const aggregate = aggregateStudyRowsDedupBySessionId(rows, { sessionId: appProp.sessionId, durationMin: appProp.durationMin, endAt: appProp.endAt }, targetDate);
 
   const dateProp = env.HEALTH_DATE_PROP || "Date";
   const titleProp = env.HEALTH_TITLE_PROP || "Name";
-  const ankiMin = env.DAILY_LOG_ANKI_MINUTES_PROPERTY_NAME || "Anki Minutes";
-  const ankiSess = env.DAILY_LOG_ANKI_SESSIONS_PROPERTY_NAME || "Anki Sessions";
-  const ankiLast = env.DAILY_LOG_ANKI_LAST_USED_AT_PROPERTY_NAME || "Anki Last Used At";
+  const studyMin = env.DAILY_LOG_STUDY_MINUTES_PROPERTY_NAME || "Study Minutes";
+  const studySess = env.DAILY_LOG_STUDY_SESSIONS_PROPERTY_NAME || "Study Sessions";
+  const studyLast = env.DAILY_LOG_STUDY_LAST_USED_AT_PROPERTY_NAME || "Study Last Used At";
 
   const dailyRows = await queryDatabaseAll(env, dailyDbId, { filter: { property: dateProp, date: { equals: targetDate } }, page_size: 1 });
   let pageId = dailyRows[0]?.id;
@@ -73,6 +73,6 @@ export const aggregateAnkiUsageForTargetDate = async (env: Env, targetDate: stri
     const created = await notionFetch(env, "/pages", { method: "POST", body: JSON.stringify({ parent: { database_id: dailyDbId }, properties: { [titleProp]: { title: [{ text: { content: `Daily Log | ${targetDate}` } }] }, [dateProp]: { date: { start: targetDate } } } }) });
     pageId = created.id;
   }
-  await notionFetch(env, `/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ properties: { [ankiMin]: { number: aggregate.minutes }, [ankiSess]: { number: aggregate.sessions }, [ankiLast]: { date: aggregate.last ? { start: aggregate.last } : null } } }) });
+  await notionFetch(env, `/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ properties: { [studyMin]: { number: aggregate.minutes }, [studySess]: { number: aggregate.sessions }, [studyLast]: { date: aggregate.last ? { start: aggregate.last } : null } } }) });
   return aggregate;
 };

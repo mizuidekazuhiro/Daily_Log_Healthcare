@@ -1,7 +1,7 @@
 import type { Env } from "../types";
 import { errorResponse, jsonResponse } from "../utils/http";
 import { NotionApiError } from "../services/notion_client";
-import { normalizeAppUsagePayload, upsertAnkiSession, validateAndComputeAppUsage } from "../services/app_usage_session_service";
+import { normalizeAppUsagePayload, upsertAppUsageSession, validateAndComputeAppUsage } from "../services/app_usage_session_service";
 
 export const handleAppUsageSessionPost = async (request: Request, env: Env): Promise<Response> => {
   try {
@@ -10,7 +10,7 @@ export const handleAppUsageSessionPost = async (request: Request, env: Env): Pro
     const computed: any = validateAndComputeAppUsage(normalized);
     if (computed.error) return errorResponse(400, computed.error);
     if (computed.ignored) return jsonResponse(200, { ok: true, ignored: true, reason: computed.reason, duration_seconds: computed.duration_seconds, daily_log_updated: false });
-    const { upsert_mode } = await upsertAnkiSession(env, normalized, computed);
+    const { upsert_mode } = await upsertAppUsageSession(env, normalized, computed);
     return jsonResponse(200, { ok: true, ignored: false, app: normalized.app, session_id: normalized.session_id, target_date: computed.target_date, duration_seconds: computed.duration_seconds, duration_min: computed.duration_min, upsert_mode, daily_log_updated: false });
   } catch (error) {
     if (error instanceof SyntaxError) return errorResponse(400, "Invalid JSON");

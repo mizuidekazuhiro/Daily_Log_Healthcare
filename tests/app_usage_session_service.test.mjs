@@ -6,7 +6,7 @@ const svc = await import('../workers/src/services/app_usage_session_pure.ts');
 const { normalizeAppUsagePayload, validateAndComputeAppUsage, isIso8601DateTimeString, getPreviousJstDateFrom } = svc;
 
 const base = {
-  app: 'Anki', session_id: 's1', started_at: '2026-05-06T01:00:00+09:00', ended_at: '2026-05-06T01:40:00+09:00', day_start_hour: 3,
+  app: 'Itojuku', session_id: 's1', started_at: '2026-05-06T01:00:00+09:00', ended_at: '2026-05-06T01:40:00+09:00', day_start_hour: 3,
 };
 
 test('target date after 03:00 JST is same day', () => {
@@ -99,7 +99,7 @@ test('aggregation dedupes duplicate Session ID rows and latest edited wins', () 
       },
     },
   ];
-  const agg = svc.aggregateAnkiRowsDedupBySessionId(rows, { sessionId: 'Session ID', durationMin: 'Duration Min', endAt: 'End At' }, '2026-05-06');
+  const agg = svc.aggregateStudyRowsDedupBySessionId(rows, { sessionId: 'Session ID', durationMin: 'Duration Min', endAt: 'End At' }, '2026-05-06');
   assert.equal(agg.minutes, 40);
   assert.equal(agg.sessions, 1);
   assert.equal(agg.last, '2026-05-06T14:00:00+09:00');
@@ -109,4 +109,59 @@ test('aggregation dedupes duplicate Session ID rows and latest edited wins', () 
 test('previous JST date helper uses scheduled UTC time correctly', () => {
   const r = getPreviousJstDateFrom(Date.parse('2026-05-06T18:00:00Z'));
   assert.equal(r, '2026-05-06');
+});
+
+
+test('non-Anki app "NotebookLM" is accepted', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'NotebookLM' }));
+  assert.equal(r.error, undefined);
+});
+
+test('empty app is rejected', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: '' }));
+  assert.equal(r.error, 'app is required');
+});
+
+test('whitespace-only app is rejected', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: '   ' }));
+  assert.equal(r.error, 'app is required');
+});
+
+test('app longer than 100 chars is rejected', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'a'.repeat(101) }));
+  assert.equal(r.error, 'app must be 100 characters or fewer');
+});
+
+test('app containing control characters is rejected', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Anki\nBad' }));
+  assert.equal(r.error, 'app must not contain control characters');
+});
+
+test('aggregation includes multiple app names', () => {
+  const rows = [
+    { last_edited_time: '2026-05-06T10:00:00.000Z', properties: { 'Session ID': { rich_text: [{ plain_text: 's1' }] }, 'Duration Min': { number: 30 }, 'End At': { date: { start: '2026-05-06T10:30:00+09:00' } } } },
+    { last_edited_time: '2026-05-06T11:00:00.000Z', properties: { 'Session ID': { rich_text: [{ plain_text: 's2' }] }, 'Duration Min': { number: 60 }, 'End At': { date: { start: '2026-05-06T11:30:00+09:00' } } } },
+    { last_edited_time: '2026-05-06T12:00:00.000Z', properties: { 'Session ID': { rich_text: [{ plain_text: 's3' }] }, 'Duration Min': { number: 10.5 }, 'End At': { date: { start: '2026-05-06T12:00:00+09:00' } } } },
+  ];
+  const agg = svc.aggregateStudyRowsDedupBySessionId(rows, { sessionId: 'Session ID', durationMin: 'Duration Min', endAt: 'End At' }, '2026-05-06');
+  assert.equal(agg.minutes, 100.5);
+  assert.equal(agg.sessions, 3);
+});
+
+
+test('non-Anki app "Itojuku" is accepted', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Itojuku' }));
+  assert.equal(r.error, undefined);
+});
+
+test('aggregation uses DAILY_LOG_DB_ID, not HEALTH_DB_ID, and no DAILY_LOG_ANKI_* fallback in service source', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../workers/src/services/app_usage_session_service.ts', import.meta.url), 'utf8');
+  const aggStart = src.indexOf('export const aggregateStudyUsageForTargetDate');
+  const aggBody = src.slice(aggStart, src.length);
+  assert.equal(aggBody.includes('env.DAILY_LOG_DB_ID'), true);
+  assert.equal(aggBody.includes('env.HEALTH_DB_ID'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_MINUTES_PROPERTY_NAME'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_SESSIONS_PROPERTY_NAME'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_LAST_USED_AT_PROPERTY_NAME'), false);
 });
