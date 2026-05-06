@@ -154,11 +154,14 @@ test('non-Anki app "Itojuku" is accepted', () => {
   assert.equal(r.error, undefined);
 });
 
-test('aggregation uses DAILY_LOG_DB_ID and not HEALTH_DB_ID in service source', async () => {
+test('aggregation uses DAILY_LOG_DB_ID, not HEALTH_DB_ID, and no DAILY_LOG_ANKI_* fallback in service source', async () => {
   const fs = await import('node:fs/promises');
   const src = await fs.readFile(new URL('../workers/src/services/app_usage_session_service.ts', import.meta.url), 'utf8');
   const aggStart = src.indexOf('export const aggregateStudyUsageForTargetDate');
   const aggBody = src.slice(aggStart, src.length);
   assert.equal(aggBody.includes('env.DAILY_LOG_DB_ID'), true);
   assert.equal(aggBody.includes('env.HEALTH_DB_ID'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_MINUTES_PROPERTY_NAME'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_SESSIONS_PROPERTY_NAME'), false);
+  assert.equal(aggBody.includes('DAILY_LOG_ANKI_LAST_USED_AT_PROPERTY_NAME'), false);
 });

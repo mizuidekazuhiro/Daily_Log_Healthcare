@@ -63,9 +63,9 @@ export const aggregateStudyUsageForTargetDate = async (env: Env, targetDate: str
 
   const dateProp = env.HEALTH_DATE_PROP || "Date";
   const titleProp = env.HEALTH_TITLE_PROP || "Name";
-  const studyMin = env.DAILY_LOG_STUDY_MINUTES_PROPERTY_NAME || env.DAILY_LOG_ANKI_MINUTES_PROPERTY_NAME || "Study Minutes";
-  const studySess = env.DAILY_LOG_STUDY_SESSIONS_PROPERTY_NAME || env.DAILY_LOG_ANKI_SESSIONS_PROPERTY_NAME || "Study Sessions";
-  const studyLast = env.DAILY_LOG_STUDY_LAST_USED_AT_PROPERTY_NAME || env.DAILY_LOG_ANKI_LAST_USED_AT_PROPERTY_NAME || "Study Last Used At";
+  const studyMin = env.DAILY_LOG_STUDY_MINUTES_PROPERTY_NAME || "Study Minutes";
+  const studySess = env.DAILY_LOG_STUDY_SESSIONS_PROPERTY_NAME || "Study Sessions";
+  const studyLast = env.DAILY_LOG_STUDY_LAST_USED_AT_PROPERTY_NAME || "Study Last Used At";
 
   const dailyRows = await queryDatabaseAll(env, dailyDbId, { filter: { property: dateProp, date: { equals: targetDate } }, page_size: 1 });
   let pageId = dailyRows[0]?.id;
