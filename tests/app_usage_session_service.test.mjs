@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 const svc = await import('../workers/src/services/app_usage_session_pure.ts');
 
-const { normalizeAppUsagePayload, validateAndComputeAppUsage, isIso8601DateTimeString } = svc;
+const { normalizeAppUsagePayload, validateAndComputeAppUsage, isIso8601DateTimeString, getPreviousJstDateFrom } = svc;
 
 const base = {
   app: 'Anki', session_id: 's1', started_at: '2026-05-06T01:00:00+09:00', ended_at: '2026-05-06T01:40:00+09:00', day_start_hour: 3,
@@ -39,9 +39,27 @@ test('ended_at before started_at is rejected', () => {
   assert.equal(r.error, 'ended_at must be later than started_at');
 });
 
-test('duration below 30 seconds is ignored', () => {
-  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:20+09:00' }));
+test('5 seconds is ignored', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:05+09:00' }));
   assert.equal(r.ignored, true);
+});
+
+test('10 seconds is recorded with duration_min = 0.17', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:10+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 0.17);
+});
+
+test('45 seconds is recorded with duration_min = 0.75', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:45+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 0.75);
+});
+
+test('90 seconds is recorded with duration_min = 1.5', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:01:30+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 1.5);
 });
 
 test('duration above six hours is capped', () => {
@@ -85,4 +103,10 @@ test('aggregation dedupes duplicate Session ID rows and latest edited wins', () 
   assert.equal(agg.minutes, 40);
   assert.equal(agg.sessions, 1);
   assert.equal(agg.last, '2026-05-06T14:00:00+09:00');
+});
+
+
+test('previous JST date helper uses scheduled UTC time correctly', () => {
+  const r = getPreviousJstDateFrom(Date.parse('2026-05-06T18:00:00Z'));
+  assert.equal(r, '2026-05-06');
 });
