@@ -39,9 +39,27 @@ test('ended_at before started_at is rejected', () => {
   assert.equal(r.error, 'ended_at must be later than started_at');
 });
 
-test('duration below 30 seconds is ignored', () => {
-  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:20+09:00' }));
+test('5 seconds is ignored', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:05+09:00' }));
   assert.equal(r.ignored, true);
+});
+
+test('10 seconds is recorded with duration_min = 0.17', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:10+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 0.17);
+});
+
+test('45 seconds is recorded with duration_min = 0.75', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:00:45+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 0.75);
+});
+
+test('90 seconds is recorded with duration_min = 1.5', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:01:30+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_min, 1.5);
 });
 
 test('duration above six hours is capped', () => {
