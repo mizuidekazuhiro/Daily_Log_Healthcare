@@ -15,6 +15,15 @@ test('target date after 03:00 JST is same day', () => {
   assert.equal(r.target_date, '2026-05-06');
 });
 
+
+
+test('target date handles midnight hour as previous day when day_start_hour is 3', () => {
+  const n = normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T00:00:00+09:00', ended_at: '2026-05-06T00:30:00+09:00', day_start_hour: 3 });
+  const r = validateAndComputeAppUsage(n);
+  assert.equal(r.target_date, '2026-05-05');
+});
+
+
 test('target date before 03:00 JST is previous day', () => {
   const n = normalizeAppUsagePayload({ ...base, ended_at: '2026-05-06T02:05:00+09:00' });
   const r = validateAndComputeAppUsage(n);

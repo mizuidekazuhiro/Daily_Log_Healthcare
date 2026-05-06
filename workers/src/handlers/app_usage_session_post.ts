@@ -30,7 +30,7 @@ export const handleAppUsageSessionPost = async (request: Request, env: Env): Pro
     const dailyRows = await queryDatabaseAll(env, dailyDbId, { filter: { property: dateProp, date: { equals: computed.target_date } }, page_size: 1 });
     let pageId = dailyRows[0]?.id;
     if (!pageId) {
-      const created = await notionFetch(env, "/pages", { method: "POST", body: JSON.stringify({ parent: { database_id: dailyDbId }, properties: { [titleProp]: { title: [{ text: { content: computed.target_date } }] }, [dateProp]: { date: { start: computed.target_date } } } }) });
+      const created = await notionFetch(env, "/pages", { method: "POST", body: JSON.stringify({ parent: { database_id: dailyDbId }, properties: { [titleProp]: { title: [{ text: { content: `Daily Log | ${computed.target_date}` } }] }, [dateProp]: { date: { start: computed.target_date } } } }) });
       pageId = created.id;
     }
     await notionFetch(env, `/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ properties: { [ankiMin]: { number: aggregate.minutes }, [ankiSess]: { number: aggregate.sessions }, [ankiLast]: { date: aggregate.last ? { start: aggregate.last } : null } } }) });
