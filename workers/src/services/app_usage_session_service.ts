@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { notionFetch, queryDatabaseAll } from "./notion_client";
-import { normalizeAppUsagePayload, validateAndComputeAppUsage, type NormalizedAppUsage } from "./app_usage_session_pure";
+import { aggregateAnkiRowsDedupBySessionId, normalizeAppUsagePayload, validateAndComputeAppUsage, type NormalizedAppUsage } from "./app_usage_session_pure";
 
 export { normalizeAppUsagePayload, validateAndComputeAppUsage };
 
@@ -45,14 +45,7 @@ export const upsertAndAggregateAnkiSession = async (env: Env, normalized: Normal
 
   console.log("APP_USAGE_DAILY_AGGREGATION_START", { target_date: computed.target_date });
   const rows = await queryDatabaseAll(env, appDbId, { filter: { and: [{ property: appProp.app, select: { equals: "Anki" } }, { property: appProp.targetDate, date: { equals: computed.target_date } }] } });
-  const agg = rows.reduce((acc, r) => {
-    const mins = r.properties?.[appProp.durationMin]?.number ?? 0;
-    const end = r.properties?.[appProp.endAt]?.date?.start ?? null;
-    acc.minutes += Number.isFinite(mins) ? mins : 0;
-    acc.sessions += 1;
-    if (end && (!acc.last || Date.parse(end) > Date.parse(acc.last))) acc.last = end;
-    return acc;
-  }, { minutes: 0, sessions: 0, last: null as string | null });
+  const agg = aggregateAnkiRowsDedupBySessionId(rows, { sessionId: appProp.sessionId, durationMin: appProp.durationMin, endAt: appProp.endAt }, computed.target_date);
   console.log("APP_USAGE_DAILY_AGGREGATION_END", { target_date: computed.target_date, aggregate_minutes: agg.minutes, aggregate_sessions: agg.sessions, last_used_at: agg.last });
   return { upsert_mode, aggregate: agg };
 };

@@ -60,3 +60,29 @@ test('normalization handles iOS Shortcuts nested dictionary shape', () => {
   assert.equal(n.app, 'Anki');
   assert.equal(n.session_id, 'abc');
 });
+
+
+test('aggregation dedupes duplicate Session ID rows and latest edited wins', () => {
+  const rows = [
+    {
+      last_edited_time: '2026-05-06T10:00:00.000Z',
+      properties: {
+        'Session ID': { rich_text: [{ plain_text: 'dup-1' }] },
+        'Duration Min': { number: 40 },
+        'End At': { date: { start: '2026-05-06T13:40:00+09:00' } },
+      },
+    },
+    {
+      last_edited_time: '2026-05-06T11:00:00.000Z',
+      properties: {
+        'Session ID': { rich_text: [{ plain_text: 'dup-1' }] },
+        'Duration Min': { number: 40 },
+        'End At': { date: { start: '2026-05-06T14:00:00+09:00' } },
+      },
+    },
+  ];
+  const agg = svc.aggregateAnkiRowsDedupBySessionId(rows, { sessionId: 'Session ID', durationMin: 'Duration Min', endAt: 'End At' }, '2026-05-06');
+  assert.equal(agg.minutes, 40);
+  assert.equal(agg.sessions, 1);
+  assert.equal(agg.last, '2026-05-06T14:00:00+09:00');
+});
