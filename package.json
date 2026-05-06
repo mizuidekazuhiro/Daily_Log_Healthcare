@@ -5,7 +5,8 @@
   "description": "Cloudflare Workers bridge for Notion Daily_Log upsert.",
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "test": "node --test tests/app_usage_session_service.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^3.99.0"
