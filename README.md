@@ -615,3 +615,15 @@ Meal Photos 連携 (`/api/daily-log/meal-photos/run`) では Notion の列名を
 - Source: `DAILY_LOG_SOURCE_PROP` → `Source`
 
 `HEALTH_TITLE_PROP = "Name"` は互換用デフォルトです。Notion 側の title 列名が `Name` でない場合は、`DAILY_LOG_TITLE_PROP` か `HEALTH_TITLE_PROP` を実際の列名に必ず合わせてください。
+
+実運用例（Notionのtitle列が「名前」の場合）:
+
+```env
+HEALTH_TITLE_PROP=名前
+DAILY_LOG_TITLE_PROP=名前
+HEALTH_DATE_PROP=Date
+DAILY_LOG_DATE_PROP=Date
+DAILY_LOG_MEAL_PHOTOS_PROP=Meal Photos
+DAILY_LOG_SOURCE_PROP=Source
+```
+

@@ -1120,11 +1120,21 @@ const runMealPhotos = async (
     };
   }
 
+  let schemaCheck: { ok: true } | MealPhotoRunResult;
   try {
-    const schemaCheck = await validateDailyLogSchema(env);
-    if (!schemaCheck.ok) {
-      return schemaCheck;
-    }
+    schemaCheck = await validateDailyLogSchema(env);
+  } catch (error) {
+    return {
+      ok: false,
+      error: "Daily Log schema preflight failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (!schemaCheck.ok) {
+    return schemaCheck;
+  }
+
+  try {
     await getDropboxAccessToken(env);
   } catch (error) {
     return {
