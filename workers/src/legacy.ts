@@ -13,6 +13,10 @@ export interface Env {
   HEALTH_DB_ID?: string;
   HEALTH_DATE_PROP?: string;
   HEALTH_TITLE_PROP?: string;
+  DAILY_LOG_DATE_PROP?: string;
+  DAILY_LOG_TITLE_PROP?: string;
+  DAILY_LOG_MEAL_PHOTOS_PROP?: string;
+  DAILY_LOG_SOURCE_PROP?: string;
   HEALTH_API_KEY: string;
   DROPBOX_CLIENT_ID?: string;
   DROPBOX_CLIENT_SECRET?: string;
@@ -72,6 +76,11 @@ type MealPhotoRunResult =
       status?: number;
       date?: string;
       code?: string;
+      database_id_present?: boolean;
+      missing_properties?: string[];
+      type_mismatches?: Array<{ property: string; expected: string; actual: string | null }> ;
+      resolved_props?: { date: string; title: string; mealPhotos: string; source: string };
+      hint?: string;
     };
 
 const NOTION_VERSION = "2022-06-28";
@@ -646,6 +655,7 @@ const buildMealPhotoName = (entry: DropboxFileEntry): string => {
 };
 
 const extractMealPhotosExistingState = (
+  mealPhotosProp: string,
   properties?: Record<string, unknown>,
 ): MealPhotosExistingState => {
   const initialReasons: Record<MealPhotoSkipReason, number> = {
@@ -655,7 +665,7 @@ const extractMealPhotosExistingState = (
     unsupported_property_shape: 0,
   };
 
-  const mealProp = properties?.["Meal Photos"] as
+  const mealProp = properties?.[mealPhotosProp] as
     | { type?: string; files?: unknown[] }
     | undefined;
 
@@ -898,9 +908,43 @@ const getDropboxSharedLink = async (
   return { ok: true, url: toDropboxRawUrl(url) };
 };
 
+
+const resolveDailyLogDbId = (env: Env): string | undefined =>
+  env.DAILY_LOG_DB_ID ?? env.HEALTH_DB_ID;
+
+const resolveMealPhotoProps = (env: Env) => ({
+  dateProp: env.DAILY_LOG_DATE_PROP ?? env.HEALTH_DATE_PROP ?? "Date",
+  titleProp: env.DAILY_LOG_TITLE_PROP ?? env.HEALTH_TITLE_PROP ?? "Name",
+  mealPhotosProp: env.DAILY_LOG_MEAL_PHOTOS_PROP ?? "Meal Photos",
+  sourceProp: env.DAILY_LOG_SOURCE_PROP ?? "Source",
+});
+
+const validateDailyLogSchema = async (env: Env): Promise<{ ok: true } | MealPhotoRunResult> => {
+  const dbId = resolveDailyLogDbId(env);
+  const { dateProp, titleProp, mealPhotosProp, sourceProp } = resolveMealPhotoProps(env);
+  if (!dbId) return { ok: false, error: "Daily Log database id missing", detail: "Set DAILY_LOG_DB_ID or HEALTH_DB_ID" };
+  const dbResult = await notionRequest(`https://api.notion.com/v1/databases/${dbId}`, { method: "GET" }, env.NOTION_TOKEN);
+  if (!dbResult.ok) return { ok: false, error: "Notion API error", status: dbResult.status, detail: dbResult.text };
+  const properties = (dbResult.json.properties ?? {}) as Record<string, { type?: string }>;
+  const missing: string[] = [];
+  const type_mismatches: Array<{ property: string; expected: string; actual: string | null }> = [];
+  const check = (name: string, expected: string) => {
+    const p = properties[name];
+    if (!p) missing.push(name);
+    else if (p.type !== expected) type_mismatches.push({ property: name, expected, actual: p.type ?? null });
+  };
+  check(dateProp, "date");
+  check(titleProp, "title");
+  check(mealPhotosProp, "files");
+  if (missing.length || type_mismatches.length) {
+    return { ok: false, error: "Daily Log Notion schema mismatch", status: 422, database_id_present: true, missing_properties: missing, type_mismatches, resolved_props: { date: dateProp, title: titleProp, mealPhotos: mealPhotosProp, source: sourceProp }, hint: "Set DAILY_LOG_TITLE_PROP or HEALTH_TITLE_PROP to the actual Notion title property name." };
+  }
+  return { ok: true };
+};
+
 const canSetDropboxSource = async (env: Env): Promise<boolean> => {
   const dbResult = await notionRequest(
-    `https://api.notion.com/v1/databases/${env.DAILY_LOG_DB_ID}`,
+    `https://api.notion.com/v1/databases/${resolveDailyLogDbId(env)}`,
     { method: "GET" },
     env.NOTION_TOKEN,
   );
@@ -915,7 +959,8 @@ const canSetDropboxSource = async (env: Env): Promise<boolean> => {
   const properties = dbResult.json.properties as
     | Record<string, { type?: string; select?: { options?: Array<{ name?: string }> } }>
     | undefined;
-  const sourceProp = properties?.["Source"];
+  const sourcePropName = resolveMealPhotoProps(env).sourceProp;
+  const sourceProp = properties?.[sourcePropName];
   if (sourceProp?.type !== "select") {
     return false;
   }
@@ -934,7 +979,7 @@ const ensureDailyLogPageByDate = async (
 > => {
   const queryBody = {
     filter: {
-      property: "Date",
+      property: resolveMealPhotoProps(env).dateProp,
       date: {
         equals: date,
       },
@@ -943,7 +988,7 @@ const ensureDailyLogPageByDate = async (
   };
 
   const queryResult = await notionRequest(
-    `https://api.notion.com/v1/databases/${env.DAILY_LOG_DB_ID}/query`,
+    `https://api.notion.com/v1/databases/${resolveDailyLogDbId(env)}/query`,
     {
       method: "POST",
       body: JSON.stringify(queryBody),
@@ -991,22 +1036,23 @@ const ensureDailyLogPageByDate = async (
     }
 
     const properties = pageResult.json.properties as Record<string, unknown> | undefined;
-    const existingState = extractMealPhotosExistingState(properties);
+    const existingState = extractMealPhotosExistingState(resolveMealPhotoProps(env).mealPhotosProp, properties);
 
     return { ok: true, pageId, existingState };
   }
 
+  const { titleProp, dateProp, sourceProp } = resolveMealPhotoProps(env);
   const createProps: Record<string, unknown> = {
-    Name: {
+    [titleProp]: {
       title: [{ text: { content: `Daily Log | ${date}` } }],
     },
-    Date: {
+    [dateProp]: {
       date: { start: date },
     },
   };
 
   if (await canSetDropboxSource(env)) {
-    createProps["Source"] = { select: { name: "dropbox" } };
+    createProps[sourceProp] = { select: { name: "dropbox" } };
   }
 
   const createResult = await notionRequest(
@@ -1014,7 +1060,7 @@ const ensureDailyLogPageByDate = async (
     {
       method: "POST",
       body: JSON.stringify({
-        parent: { database_id: env.DAILY_LOG_DB_ID },
+        parent: { database_id: resolveDailyLogDbId(env) },
         properties: createProps,
       }),
     },
@@ -1040,7 +1086,7 @@ const ensureDailyLogPageByDate = async (
   return {
     ok: true,
     pageId: createdId,
-    existingState: extractMealPhotosExistingState(),
+    existingState: extractMealPhotosExistingState(resolveMealPhotoProps(env).mealPhotosProp),
   };
 };
 
@@ -1072,6 +1118,20 @@ const runMealPhotos = async (
       error: "Dropbox environment variables missing",
       detail: `Missing: ${missingEnv.join(", ")}`,
     };
+  }
+
+  let schemaCheck: { ok: true } | MealPhotoRunResult;
+  try {
+    schemaCheck = await validateDailyLogSchema(env);
+  } catch (error) {
+    return {
+      ok: false,
+      error: "Daily Log schema preflight failed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (!schemaCheck.ok) {
+    return schemaCheck;
   }
 
   try {
@@ -1211,7 +1271,7 @@ const runMealPhotos = async (
       method: "PATCH",
       body: JSON.stringify({
         properties: {
-          "Meal Photos": {
+          [resolveMealPhotoProps(env).mealPhotosProp]: {
             files: [...existingFiles, ...newFiles],
           },
         },
@@ -1365,6 +1425,8 @@ const handleMealPhotosRun = async (
     return jsonResponse({ ok: false, error: "Internal Server Error", requestId }, 500);
   }
 };
+
+export const __mealPhotosInternals = { resolveMealPhotoProps };
 
 export const handleLegacyRoute = async (
   request: Request,
