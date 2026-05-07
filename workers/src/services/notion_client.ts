@@ -3,12 +3,12 @@ import type { Env } from "../types";
 const NOTION_VERSION = "2022-06-28";
 
 export class NotionApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public responseText: string,
-  ) {
+  status: number;
+  responseText: string;
+  constructor(message: string, status: number, responseText: string) {
     super(message);
+    this.status = status;
+    this.responseText = responseText;
   }
 }
 

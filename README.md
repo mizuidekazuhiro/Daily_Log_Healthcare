@@ -541,3 +541,60 @@ curl -X POST "https://<your-worker-domain>/api/app-usage/session" \
 - `HEALTH_DB_ID` は Health condition DB 用であり、study集計には使用しません。
 - `APP_USAGE_DAILY_LOG_DB_ID` は不要です。
 - 手動リカバリ用エンドポイント: `POST /api/app-usage/aggregate`（通常のiPhone Shortcutsからは呼ばない）。
+
+
+## Voice Diary Notes API
+
+### エンドポイント
+- `POST /api/voice-diary/note`
+- 認証: `Authorization: Bearer <HEALTH_API_KEY>`
+
+### 用途
+- iPhoneショートカットの音声入力メモを Notion の **Voice Diary Notes DB** に 1メモ=1ページで保存します。
+- 当日 Daily Log ページ未作成の可能性を考慮し、このAPIでは **Daily Log DBは更新しません**。
+
+### 必須環境変数
+- `VOICE_DIARY_NOTES_DB_ID`（例: `788ff2d3-f4f7-44bc-9f99-db301250efae`）
+
+### 受信JSON
+```json
+{
+  "text": "夕方に集中力が落ちた。昼食後の眠気が強かった。",
+  "recorded_at": "2026-05-07T18:10:00+09:00",
+  "source": "ios_shortcut_voice",
+  "target_date": "2026-05-07",
+  "day_start_hour": 3
+}
+```
+
+### バリデーション/補完
+- `text`: 必須、trim後空文字NG、最大2000文字
+- `recorded_at`: 未指定ならサーバ側でJST現在時刻を補完。指定時はISO 8601 datetime必須
+- `target_date`: 未指定なら `recorded_at` と `day_start_hour`（default 3）からJST基準で算出
+- `day_start_hour=3` の場合、JST 00:00〜02:59 は前日扱い
+- `source`: 未指定なら `ios_shortcut_voice`、制御文字NG
+- `note_hash`: `target_date + recorded_at + normalized_text` から sha256
+- 注意: `recorded_at` を未指定にしてサーバ補完すると、再送のたびに時刻が変わり同文でも別ハッシュになります。ショートカット側で `recorded_at` を1回生成して送ることを推奨します。
+
+### 重複判定
+- 同一 `Note Hash` が既存なら新規作成せず `200` を返します（`deduped: true`）。
+- 新規作成時は `Status = new`。
+
+### レスポンス例
+```json
+{
+  "ok": true,
+  "created": true,
+  "deduped": false,
+  "target_date": "2026-05-07",
+  "recorded_at": "2026-05-07T18:10:00+09:00",
+  "note_hash": "..."
+}
+```
+
+### iPhoneショートカット作成手順（最小）
+1. 「音声をテキスト化」で本文を作る
+2. JSONを組み立てる（`text`, `recorded_at`, `source`, `target_date`, `day_start_hour`）
+3. 「URLの内容を取得」で `POST /api/voice-diary/note` を呼ぶ
+4. Headerに `Authorization: Bearer <HEALTH_API_KEY>` と `Content-Type: application/json` を設定
+5. 結果JSONの `ok` と `deduped` を通知表示

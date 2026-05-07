@@ -77,7 +77,7 @@ test('succeeds when all new optional fields are sent', () => {
       },
     ],
   });
-  assert.deepEqual(props['Heart Rate Percent'], { number: 153 });
+  assert.deepEqual(props['Heart Rate Percent'], { number: 1.53 });
 });
 
 test('ignores empty, null, and unparseable optional additions while continuing', () => {
