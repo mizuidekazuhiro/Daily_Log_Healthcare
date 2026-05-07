@@ -120,6 +120,10 @@ npm install
 
 - `HEALTH_DATE_PROP`
 - `HEALTH_TITLE_PROP`
+- `DAILY_LOG_DATE_PROP`
+- `DAILY_LOG_TITLE_PROP`
+- `DAILY_LOG_MEAL_PHOTOS_PROP`
+- `DAILY_LOG_SOURCE_PROP`
 - `MEAL_PHOTOS_FOLDER_PATH`
 - `DROPBOX_CLIENT_ID`
 - `TZ`
@@ -598,3 +602,16 @@ curl -X POST "https://<your-worker-domain>/api/app-usage/session" \
 3. 「URLの内容を取得」で `POST /api/voice-diary/note` を呼ぶ
 4. Headerに `Authorization: Bearer <HEALTH_API_KEY>` と `Content-Type: application/json` を設定
 5. 結果JSONの `ok` と `deduped` を通知表示
+
+
+### Meal Photos 用 Notion プロパティ名の設定
+
+Meal Photos 連携 (`/api/daily-log/meal-photos/run`) では Notion の列名を固定せず、以下の優先順位で解決します。
+
+- DB ID: `DAILY_LOG_DB_ID` → `HEALTH_DB_ID`
+- Date: `DAILY_LOG_DATE_PROP` → `HEALTH_DATE_PROP` → `Date`
+- Title: `DAILY_LOG_TITLE_PROP` → `HEALTH_TITLE_PROP` → `Name`
+- Meal Photos: `DAILY_LOG_MEAL_PHOTOS_PROP` → `Meal Photos`
+- Source: `DAILY_LOG_SOURCE_PROP` → `Source`
+
+`HEALTH_TITLE_PROP = "Name"` は互換用デフォルトです。Notion 側の title 列名が `Name` でない場合は、`DAILY_LOG_TITLE_PROP` か `HEALTH_TITLE_PROP` を実際の列名に必ず合わせてください。

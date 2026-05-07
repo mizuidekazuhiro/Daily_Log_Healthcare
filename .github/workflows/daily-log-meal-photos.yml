@@ -40,8 +40,20 @@ jobs:
 
           echo "Request body: $BODY"
 
-          curl --fail-with-body -i \
+          HTTP_STATUS=$(curl --fail-with-body -sS -o /tmp/meal_photos_response.json -w "%{http_code}" \
             -X POST "$MEAL_PHOTOS_ENDPOINT" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $HEALTH_API_KEY" \
-            -d "$BODY"
+            -d "$BODY") || {
+              CURL_EXIT=$?
+              echo "Worker returned non-2xx" >&2
+              echo "HTTP status: ${HTTP_STATUS:-unknown}" >&2
+              echo "Request body: $BODY" >&2
+              echo "Response body:" >&2
+              cat /tmp/meal_photos_response.json >&2 || true
+              exit $CURL_EXIT
+            }
+
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Response body:"
+          cat /tmp/meal_photos_response.json
