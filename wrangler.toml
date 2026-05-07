@@ -4,7 +4,7 @@ compatibility_date = "2025-12-01"
 
 [vars]
 HEALTH_DATE_PROP = "Date"
-HEALTH_TITLE_PROP = "名前"
+HEALTH_TITLE_PROP = "Name"
 DAILY_LOG_DATE_PROP = "Date"
 DAILY_LOG_TITLE_PROP = "名前"
 DAILY_LOG_MEAL_PHOTOS_PROP = "Meal Photos"
@@ -14,7 +14,7 @@ DROPBOX_CLIENT_ID = "3pa2irxaypyniq5"
 
 [env.production.vars]
 HEALTH_DATE_PROP = "Date"
-HEALTH_TITLE_PROP = "名前"
+HEALTH_TITLE_PROP = "Name"
 DAILY_LOG_DATE_PROP = "Date"
 DAILY_LOG_TITLE_PROP = "名前"
 DAILY_LOG_MEAL_PHOTOS_PROP = "Meal Photos"
