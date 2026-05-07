@@ -10,8 +10,10 @@ export const getOrCreateDailyHealthPageId = async (
     throw new Error("HEALTH_DB_ID (or DAILY_LOG_DB_ID) is required");
   }
 
+  const selectedDatabaseEnvKey = env.HEALTH_DB_ID ? "HEALTH_DB_ID" : "DAILY_LOG_DB_ID";
   const dateProp = env.HEALTH_DATE_PROP ?? "Date";
   const titleProp = env.HEALTH_TITLE_PROP ?? "Name";
+  console.info("HEALTH_DAILY_DB_CONFIG", { selectedDatabaseEnvKey, titleProp, dateProp });
 
   const queried = await notionFetch(env, `/databases/${databaseId}/query`, {
     method: "POST",

@@ -375,6 +375,8 @@ const getHealthDatabaseId = (env: Env): string | null =>
 
 const getHealthDateProp = (env: Env): string => env.HEALTH_DATE_PROP ?? HEALTH_PROP.date;
 const getHealthTitleProp = (env: Env): string => env.HEALTH_TITLE_PROP ?? HEALTH_PROP.title;
+const getHealthDbEnvKey = (env: Env): "HEALTH_DB_ID" | "DAILY_LOG_DB_ID" =>
+  env.HEALTH_DB_ID ? "HEALTH_DB_ID" : "DAILY_LOG_DB_ID";
 
 const buildNotionPropertyErrorContext = (
   operation: "query" | "update" | "create",
@@ -423,6 +425,8 @@ export const upsertHealthDailyPage = async (
   const partialProps = buildHealthPartialProps(payload);
   const dateProp = getHealthDateProp(env);
   const titleProp = getHealthTitleProp(env);
+  const selectedDatabaseEnvKey = getHealthDbEnvKey(env);
+  console.info("HEALTH_DAILY_DB_CONFIG", { selectedDatabaseEnvKey, titleProp, dateProp });
 
   const queryBody = {
     filter: {
@@ -444,6 +448,11 @@ export const upsertHealthDailyPage = async (
   );
 
   if (!queryResult.ok) {
+    console.error("HEALTH_DAILY_DB_CONFIG_ON_ERROR", {
+      selectedDatabaseEnvKey,
+      titleProp,
+      dateProp,
+    });
     logNotionPropertyError(
       buildNotionPropertyErrorContext("query", [dateProp], queryBody),
       queryResult,
@@ -477,6 +486,11 @@ export const upsertHealthDailyPage = async (
     );
 
     if (!updateResult.ok) {
+      console.error("HEALTH_DAILY_DB_CONFIG_ON_ERROR", {
+        selectedDatabaseEnvKey,
+        titleProp,
+        dateProp,
+      });
       logNotionPropertyError(
         buildNotionPropertyErrorContext("update", Object.keys(partialProps), partialProps),
         updateResult,
@@ -519,6 +533,11 @@ export const upsertHealthDailyPage = async (
   );
 
   if (!createResult.ok) {
+    console.error("HEALTH_DAILY_DB_CONFIG_ON_ERROR", {
+      selectedDatabaseEnvKey,
+      titleProp,
+      dateProp,
+    });
     logNotionPropertyError(
       buildNotionPropertyErrorContext("create", Object.keys(createProps), createProps),
       createResult,

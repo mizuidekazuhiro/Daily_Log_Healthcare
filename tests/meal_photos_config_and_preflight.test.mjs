@@ -5,10 +5,10 @@ import fs from 'node:fs';
 const wrangler = fs.readFileSync('wrangler.toml', 'utf8');
 const legacy = fs.readFileSync('workers/src/legacy.ts', 'utf8');
 
-test('wrangler.toml has no title prop Name defaults', () => {
-  assert.equal(wrangler.includes('HEALTH_TITLE_PROP = "Name"'), false);
+test('wrangler.toml title prop defaults match database roles', () => {
+  assert.equal(wrangler.includes('HEALTH_TITLE_PROP = "Name"'), true);
   assert.equal(wrangler.includes('DAILY_LOG_TITLE_PROP = "Name"'), false);
-  assert.equal(wrangler.includes('HEALTH_TITLE_PROP = "名前"'), true);
+  assert.equal(wrangler.includes('HEALTH_TITLE_PROP = "名前"'), false);
   assert.equal(wrangler.includes('DAILY_LOG_TITLE_PROP = "名前"'), true);
 });
 

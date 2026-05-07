@@ -128,6 +128,11 @@ npm install
 - `DROPBOX_CLIENT_ID`
 - `TZ`
 
+### DBごとの title property
+
+- Health condition DB (`HEALTH_DB_ID`) の title property は `Name`
+- Daily_Log DB (`DAILY_LOG_DB_ID`) の title property は `名前`
+
 ### 6. Cloudflare に Secret を設定する
 
 #### 本番環境
@@ -182,6 +187,7 @@ npm run deploy
 
 ### 挙動
 
+- `/api/health/daily` は `HEALTH_DB_ID` を使う場合、Health condition DB に書き込む前提（`HEALTH_DB_ID` 優先、未設定時のみ `DAILY_LOG_DB_ID` を使用）
 - `Date` をキーに Notion の既存ページを検索
 - 既存ページがあれば PATCH、なければ CREATE
 - `null` / `undefined` / 空文字の項目は Notion に書き込まない
@@ -192,6 +198,10 @@ npm run deploy
 - `readiness_label` は空でない場合のみ `Readiness Label` に `{ rich_text: [{ type: "text", text: { content } }] }` 形式で保存する
 - 既存の `weight` / `protein` / `fat` / `carb` / `kcal` / `source` / 睡眠項目の挙動は維持する
 - `sleep_start` / `sleep_end` は既存仕様どおり ISO 8601 を要求する
+- 起動時またはエラー時ログに以下を出力
+  - selected database env key (`HEALTH_DB_ID` または `DAILY_LOG_DB_ID`)
+  - title property name
+  - date property name
 
 ### APIキー → Notionプロパティ対応
 
@@ -616,14 +626,13 @@ Meal Photos 連携 (`/api/daily-log/meal-photos/run`) では Notion の列名を
 
 `HEALTH_TITLE_PROP = "Name"` は互換用デフォルトです。Notion 側の title 列名が `Name` でない場合は、`DAILY_LOG_TITLE_PROP` か `HEALTH_TITLE_PROP` を実際の列名に必ず合わせてください。
 
-実運用例（Notionのtitle列が「名前」の場合）:
+実運用例（Health condition DB の title が `Name`、Daily_Log DB の title が `名前` の場合）:
 
 ```env
-HEALTH_TITLE_PROP=名前
+HEALTH_TITLE_PROP=Name
 DAILY_LOG_TITLE_PROP=名前
 HEALTH_DATE_PROP=Date
 DAILY_LOG_DATE_PROP=Date
 DAILY_LOG_MEAL_PHOTOS_PROP=Meal Photos
 DAILY_LOG_SOURCE_PROP=Source
 ```
-
