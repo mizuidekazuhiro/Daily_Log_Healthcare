@@ -574,6 +574,7 @@ curl -X POST "https://<your-worker-domain>/api/app-usage/session" \
 - `day_start_hour=3` の場合、JST 00:00〜02:59 は前日扱い
 - `source`: 未指定なら `ios_shortcut_voice`、制御文字NG
 - `note_hash`: `target_date + recorded_at + normalized_text` から sha256
+- 注意: `recorded_at` を未指定にしてサーバ補完すると、再送のたびに時刻が変わり同文でも別ハッシュになります。ショートカット側で `recorded_at` を1回生成して送ることを推奨します。
 
 ### 重複判定
 - 同一 `Note Hash` が既存なら新規作成せず `200` を返します（`deduped: true`）。

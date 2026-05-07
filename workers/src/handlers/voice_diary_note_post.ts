@@ -7,7 +7,8 @@ import { errorResponse, jsonResponse } from "../utils/http.ts";
 export const handleVoiceDiaryNotePost = async (request: Request, env: Env): Promise<Response> => {
   try {
     const raw = await request.json();
-    console.log("VOICE_DIARY_NOTE_RECEIVED", { has_text: Boolean(raw?.text) });
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return errorResponse(400, "request body must be a JSON object");
+    console.log("VOICE_DIARY_NOTE_RECEIVED", { has_text: Boolean((raw as any)?.text) });
     const normalized = normalizeVoiceDiaryPayload(raw);
     const computed: any = await validateAndComputeVoiceDiary(normalized);
     if (computed.error) {

@@ -33,3 +33,19 @@ test('深夜2:30かつday_start_hour=3なら前日', async () => {
   const r = await pure.validateAndComputeVoiceDiary(pure.normalizeVoiceDiaryPayload({ text: 'x', recorded_at: '2026-05-07T02:30:00+09:00', day_start_hour: 3 }));
   assert.equal(r.target_date, '2026-05-06');
 });
+
+
+test('source未指定はios_shortcut_voice', async () => {
+  const r = await pure.validateAndComputeVoiceDiary(pure.normalizeVoiceDiaryPayload({ text: 'x', recorded_at: '2026-05-07T18:10:00+09:00' }));
+  assert.equal(r.source, 'ios_shortcut_voice');
+});
+
+test('source不正値は400相当エラー', async () => {
+  const r = await pure.validateAndComputeVoiceDiary(pure.normalizeVoiceDiaryPayload({ text: 'x', recorded_at: '2026-05-07T18:10:00+09:00', source: 'invalid' }));
+  assert.equal(r.error, 'source must be one of ios_shortcut_voice, manual, test');
+});
+
+test('target_date=2026-02-30は無効', async () => {
+  const r = await pure.validateAndComputeVoiceDiary(pure.normalizeVoiceDiaryPayload({ text: 'x', recorded_at: '2026-05-07T18:10:00+09:00', target_date: '2026-02-30' }));
+  assert.equal(r.error, 'target_date must be a valid YYYY-MM-DD date');
+});
