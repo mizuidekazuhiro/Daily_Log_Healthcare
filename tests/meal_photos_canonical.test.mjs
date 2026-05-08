@@ -23,6 +23,13 @@ test('duplicate meal photos are merged into canonical existing files and diagnos
   assert.equal(legacy.includes('action = newFiles.length === 0 && pageResult.mergedDuplicateMealPhotosCount > 0 ? "merged_duplicates" : "added"'), true);
 });
 
+test('no target files still resolves canonical and can return merged_duplicates', () => {
+  assert.equal(legacy.includes('if (targetFiles.length === 0)'), true);
+  assert.equal(legacy.includes('action: needsPatch ? "merged_duplicates" : "no_files"'), true);
+  assert.equal(legacy.includes('const needsPatch = pageResult.mergedDuplicateMealPhotosCount > 0;'), true);
+  assert.equal(legacy.includes('`https://api.notion.com/v1/pages/${pageResult.pageId}`'), true);
+});
+
 test('dropbox url normalization ignores raw/dl differences', () => {
   assert.equal(legacy.includes('u.searchParams.delete("raw")'), true);
   assert.equal(legacy.includes('u.searchParams.delete("dl")'), true);
