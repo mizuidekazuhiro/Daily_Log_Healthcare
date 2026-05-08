@@ -14,6 +14,7 @@ export interface Env {
   HEALTH_DATE_PROP?: string;
   HEALTH_TITLE_PROP?: string;
   DAILY_LOG_DATE_PROP?: string;
+  DAILY_LOG_TARGET_DATE_PROP?: string;
   DAILY_LOG_TITLE_PROP?: string;
   DAILY_LOG_MEAL_PHOTOS_PROP?: string;
   DAILY_LOG_SOURCE_PROP?: string;
@@ -58,6 +59,7 @@ type MealPhotosExistingState = {
   existingFiles: NotionFileReference[];
   existingFileIds: Set<string>;
   existingPaths: Set<string>;
+  existingExternalUrls: Set<string>;
   skippedReasonCounts: Record<MealPhotoSkipReason, number>;
 };
 
@@ -68,6 +70,17 @@ type MealPhotoRunResult =
       action: string;
       added: number;
       skipped: number;
+      target_date?: string;
+      canonical_page_id?: string;
+      daily_log_duplicate_detected?: boolean;
+      duplicate_count?: number;
+      meal_photos_existing_count?: number;
+      meal_photos_added_count?: number;
+      meal_photos_merged_count?: number;
+      title_prop_resolved?: string;
+      date_prop_resolved?: string;
+      target_date_prop_resolved?: string;
+      meal_photos_prop_resolved?: string;
     }
   | {
       ok: false;
@@ -569,6 +582,19 @@ const isDropboxExternalUrl = (url?: string): boolean => {
   return /(^https?:\/\/)?([^.]+\.)*dropbox(?:usercontent)?\.com\//i.test(url);
 };
 
+const normalizeDropboxUrlForCompare = (value?: string | null): string | null => {
+  if (typeof value !== "string") return null;
+  try {
+    const u = new URL(value);
+    if (!isDropboxExternalUrl(u.toString())) return null;
+    u.searchParams.delete("raw");
+    u.searchParams.delete("dl");
+    return `${u.origin}${u.pathname}`.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 const buildDropboxCandidateKeys = (
   entry: DropboxFileEntry,
 ): { fileId: string | null; path: string | null } => ({
@@ -675,6 +701,7 @@ const extractMealPhotosExistingState = (
       existingFiles: [],
       existingFileIds: new Set<string>(),
       existingPaths: new Set<string>(),
+      existingExternalUrls: new Set<string>(),
       skippedReasonCounts: initialReasons,
     };
   }
@@ -686,6 +713,7 @@ const extractMealPhotosExistingState = (
       existingFiles: [],
       existingFileIds: new Set<string>(),
       existingPaths: new Set<string>(),
+      existingExternalUrls: new Set<string>(),
       skippedReasonCounts: initialReasons,
     };
   }
@@ -695,6 +723,7 @@ const extractMealPhotosExistingState = (
     : [];
   const existingFileIds = new Set<string>();
   const existingPaths = new Set<string>();
+  const existingExternalUrls = new Set<string>();
 
   for (const file of files) {
     if (!file || typeof file !== "object") {
@@ -716,6 +745,8 @@ const extractMealPhotosExistingState = (
     if (existingPath) {
       existingPaths.add(existingPath);
     }
+    const normalizedUrl = normalizeDropboxUrlForCompare(file.external?.url);
+    if (normalizedUrl) existingExternalUrls.add(normalizedUrl);
   }
 
   return {
@@ -723,6 +754,7 @@ const extractMealPhotosExistingState = (
     existingFiles: files,
     existingFileIds,
     existingPaths,
+    existingExternalUrls,
     skippedReasonCounts: initialReasons,
   };
 };
@@ -914,14 +946,15 @@ const resolveDailyLogDbId = (env: Env): string | undefined =>
 
 const resolveMealPhotoProps = (env: Env) => ({
   dateProp: env.DAILY_LOG_DATE_PROP ?? env.HEALTH_DATE_PROP ?? "Date",
-  titleProp: env.DAILY_LOG_TITLE_PROP ?? env.HEALTH_TITLE_PROP ?? "Name",
+  targetDateProp: env.DAILY_LOG_TARGET_DATE_PROP ?? "Target Date",
+  titleProp: env.DAILY_LOG_TITLE_PROP ?? "名前",
   mealPhotosProp: env.DAILY_LOG_MEAL_PHOTOS_PROP ?? "Meal Photos",
   sourceProp: env.DAILY_LOG_SOURCE_PROP ?? "Source",
 });
 
 const validateDailyLogSchema = async (env: Env): Promise<{ ok: true } | MealPhotoRunResult> => {
   const dbId = resolveDailyLogDbId(env);
-  const { dateProp, titleProp, mealPhotosProp, sourceProp } = resolveMealPhotoProps(env);
+  const { dateProp, targetDateProp, titleProp, mealPhotosProp, sourceProp } = resolveMealPhotoProps(env);
   if (!dbId) return { ok: false, error: "Daily Log database id missing", detail: "Set DAILY_LOG_DB_ID or HEALTH_DB_ID" };
   const dbResult = await notionRequest(`https://api.notion.com/v1/databases/${dbId}`, { method: "GET" }, env.NOTION_TOKEN);
   if (!dbResult.ok) return { ok: false, error: "Notion API error", status: dbResult.status, detail: dbResult.text };
@@ -934,6 +967,7 @@ const validateDailyLogSchema = async (env: Env): Promise<{ ok: true } | MealPhot
     else if (p.type !== expected) type_mismatches.push({ property: name, expected, actual: p.type ?? null });
   };
   check(dateProp, "date");
+  check(targetDateProp, "date");
   check(titleProp, "title");
   check(mealPhotosProp, "files");
   if (missing.length || type_mismatches.length) {
@@ -977,14 +1011,20 @@ const ensureDailyLogPageByDate = async (
   | { ok: true; pageId: string; existingState: MealPhotosExistingState }
   | MealPhotoRunResult
 > => {
+  const { dateProp, targetDateProp, titleProp } = resolveMealPhotoProps(env);
   const queryBody = {
     filter: {
-      property: resolveMealPhotoProps(env).dateProp,
-      date: {
-        equals: date,
-      },
+      or: [
+        { property: dateProp, date: { equals: date } },
+        { property: targetDateProp, date: { equals: date } },
+        { property: titleProp, title: { equals: `Daily Log｜${date}` } },
+        { property: titleProp, title: { equals: `Daily Log | ${date}` } },
+        { property: titleProp, title: { equals: `Daily Log ${date}` } },
+        { property: titleProp, title: { equals: `Daily Log｜ ${date}` } },
+      ],
     },
-    page_size: 2,
+    page_size: 50,
+    sorts: [{ timestamp: "last_edited_time", direction: "descending" }],
   };
 
   const queryResult = await notionRequest(
@@ -1041,12 +1081,15 @@ const ensureDailyLogPageByDate = async (
     return { ok: true, pageId, existingState };
   }
 
-  const { titleProp, dateProp, sourceProp } = resolveMealPhotoProps(env);
+  const { sourceProp } = resolveMealPhotoProps(env);
   const createProps: Record<string, unknown> = {
     [titleProp]: {
-      title: [{ text: { content: `Daily Log | ${date}` } }],
+      title: [{ text: { content: `Daily Log｜${date}` } }],
     },
     [dateProp]: {
+      date: { start: date },
+    },
+    [targetDateProp]: {
       date: { start: date },
     },
   };
@@ -1168,7 +1211,7 @@ const runMealPhotos = async (
   });
 
   if (targetFiles.length === 0) {
-    return { ok: true, date: targetDate, action: "no_files", added: 0, skipped: 0 };
+    return { ok: true, date: targetDate, action: "no_files", added: 0, skipped: 0, target_date: targetDate };
   }
 
   const pageResult = await ensureDailyLogPageByDate(env, targetDate);
@@ -1177,6 +1220,7 @@ const runMealPhotos = async (
   }
 
   const existingState = pageResult.existingState;
+  const duplicateCount = 0;
   const existingFiles = existingState.existingFiles;
   const mealPhotosExistingFileCount = existingFiles.length;
   const dedupBypassedBecauseExistingEmpty =
@@ -1219,6 +1263,11 @@ const runMealPhotos = async (
     if (!linkResult.ok) {
       return linkResult;
     }
+    const normalizedCandidateUrl = normalizeDropboxUrlForCompare(linkResult.url);
+    if (normalizedCandidateUrl && existingState.existingExternalUrls.has(normalizedCandidateUrl)) {
+      skipped += 1;
+      continue;
+    }
 
     newFiles.push({
       name: buildMealPhotoName(entry),
@@ -1232,6 +1281,9 @@ const runMealPhotos = async (
     }
     if (newKeys.path) {
       existingState.existingPaths.add(newKeys.path);
+    }
+    if (normalizedCandidateUrl) {
+      existingState.existingExternalUrls.add(normalizedCandidateUrl);
     }
   }
 
@@ -1256,6 +1308,17 @@ const runMealPhotos = async (
       action: "no_new_files",
       added: 0,
       skipped,
+      target_date: targetDate,
+      canonical_page_id: pageResult.pageId,
+      daily_log_duplicate_detected: duplicateCount > 0,
+      duplicate_count: duplicateCount,
+      meal_photos_existing_count: mealPhotosExistingFileCount,
+      meal_photos_added_count: 0,
+      meal_photos_merged_count: 0,
+      title_prop_resolved: resolveMealPhotoProps(env).titleProp,
+      date_prop_resolved: resolveMealPhotoProps(env).dateProp,
+      target_date_prop_resolved: resolveMealPhotoProps(env).targetDateProp,
+      meal_photos_prop_resolved: resolveMealPhotoProps(env).mealPhotosProp,
     };
   }
 
@@ -1306,6 +1369,17 @@ const runMealPhotos = async (
     action: "added",
     added: newFiles.length,
     skipped,
+    target_date: targetDate,
+    canonical_page_id: pageResult.pageId,
+    daily_log_duplicate_detected: duplicateCount > 0,
+    duplicate_count: duplicateCount,
+    meal_photos_existing_count: mealPhotosExistingFileCount,
+    meal_photos_added_count: newFiles.length,
+    meal_photos_merged_count: 0,
+    title_prop_resolved: resolveMealPhotoProps(env).titleProp,
+    date_prop_resolved: resolveMealPhotoProps(env).dateProp,
+    target_date_prop_resolved: resolveMealPhotoProps(env).targetDateProp,
+    meal_photos_prop_resolved: resolveMealPhotoProps(env).mealPhotosProp,
   };
 };
 

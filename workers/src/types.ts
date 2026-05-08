@@ -36,6 +36,7 @@ export interface Env {
 
   // legacy envs
   DAILY_LOG_DB_ID?: string;
+  DAILY_LOG_TARGET_DATE_PROP?: string;
   DROPBOX_ACCESS_TOKEN?: string;
   DROPBOX_CLIENT_ID?: string;
   DROPBOX_CLIENT_SECRET?: string;

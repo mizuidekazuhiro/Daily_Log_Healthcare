@@ -14,6 +14,13 @@ test('wrangler.toml title prop defaults match database roles', () => {
 
 test('new page creation uses resolved titleProp key', () => {
   assert.match(legacy, /\[titleProp\]: \{\s*\n\s*title:/m);
+  assert.equal(legacy.includes('Daily Log｜${date}'), true);
+  assert.equal(legacy.includes('[targetDateProp]'), true);
+});
+
+test('meal photos resolver defaults daily log title to 名前 and health remains Name in wrangler', () => {
+  assert.equal(legacy.includes('titleProp: env.DAILY_LOG_TITLE_PROP ?? "名前"'), true);
+  assert.equal(wrangler.includes('HEALTH_TITLE_PROP = "Name"'), true);
 });
 
 test('schema preflight exception is not misclassified as Dropbox token refresh failure', () => {
