@@ -1,0 +1,29 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const legacy = fs.readFileSync('workers/src/legacy.ts', 'utf8');
+
+test('no fixed duplicate count constant remains', () => {
+  assert.equal(legacy.includes('const duplicateCount = 0;'), false);
+  assert.equal(legacy.includes('const duplicateCount = pageResult.duplicateCount;'), true);
+});
+
+test('canonical candidate query includes Date / Target Date / legacy title variants', () => {
+  assert.equal(legacy.includes('{ property: dateProp, date: { equals: date } }'), true);
+  assert.equal(legacy.includes('{ property: targetDateProp, date: { equals: date } }'), true);
+  assert.equal(legacy.includes('Daily Log｜${date}'), true);
+  assert.equal(legacy.includes('Daily Log | ${date}'), true);
+});
+
+test('duplicate meal photos are merged into canonical existing files and diagnostics returned', () => {
+  assert.equal(legacy.includes('mergedDuplicateMealPhotosCount += 1;'), true);
+  assert.equal(legacy.includes('existingState.existingFiles.push(file);'), true);
+  assert.equal(legacy.includes('meal_photos_merged_count: pageResult.mergedDuplicateMealPhotosCount'), true);
+  assert.equal(legacy.includes('action = newFiles.length === 0 && pageResult.mergedDuplicateMealPhotosCount > 0 ? "merged_duplicates" : "added"'), true);
+});
+
+test('dropbox url normalization ignores raw/dl differences', () => {
+  assert.equal(legacy.includes('u.searchParams.delete("raw")'), true);
+  assert.equal(legacy.includes('u.searchParams.delete("dl")'), true);
+});
