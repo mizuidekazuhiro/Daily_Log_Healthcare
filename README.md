@@ -620,11 +620,12 @@ Meal Photos 連携 (`/api/daily-log/meal-photos/run`) では Notion の列名を
 
 - DB ID: `DAILY_LOG_DB_ID` → `HEALTH_DB_ID`
 - Date: `DAILY_LOG_DATE_PROP` → `HEALTH_DATE_PROP` → `Date`
-- Title: `DAILY_LOG_TITLE_PROP` → `HEALTH_TITLE_PROP` → `Name`
+- Target Date: `DAILY_LOG_TARGET_DATE_PROP` → `Target Date`
+- Title (Daily_Log DB): `DAILY_LOG_TITLE_PROP` → `名前`
 - Meal Photos: `DAILY_LOG_MEAL_PHOTOS_PROP` → `Meal Photos`
 - Source: `DAILY_LOG_SOURCE_PROP` → `Source`
 
-`HEALTH_TITLE_PROP = "Name"` は互換用デフォルトです。Notion 側の title 列名が `Name` でない場合は、`DAILY_LOG_TITLE_PROP` か `HEALTH_TITLE_PROP` を実際の列名に必ず合わせてください。
+`HEALTH_TITLE_PROP` は Health condition DB 用 (`Name`) です。Meal Photos 連携では `DAILY_LOG_TITLE_PROP=名前` を推奨します。Daily Log 作成時は `Date` / `Target Date` を必ず設定し、title は検索キーにせず Date 基準で canonical page を解決します。既存 duplicate page は削除せず、Meal Photos を canonical へマージします。
 
 実運用例（Health condition DB の title が `Name`、Daily_Log DB の title が `名前` の場合）:
 
