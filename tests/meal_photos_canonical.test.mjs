@@ -30,6 +30,21 @@ test('no target files still resolves canonical and can return merged_duplicates'
   assert.equal(legacy.includes('`https://api.notion.com/v1/pages/${pageResult.pageId}`'), true);
 });
 
+test('no top-level misplaced targetFiles block after handleLegacyRoute', () => {
+  const routeIdx = legacy.lastIndexOf('export const handleLegacyRoute');
+  const misplacedIdx = legacy.indexOf('if (targetFiles.length === 0)', routeIdx);
+  assert.equal(misplacedIdx, -1);
+});
+
+test('targetFiles zero branch appears after ensureDailyLogPageByDate in runMealPhotos', () => {
+  const ensureIdx = legacy.indexOf('const pageResult = await ensureDailyLogPageByDate(env, targetDate);');
+  const zeroIdx = legacy.indexOf('if (targetFiles.length === 0)', ensureIdx);
+  assert.equal(ensureIdx > -1, true);
+  assert.equal(zeroIdx > ensureIdx, true);
+  assert.equal(legacy.includes('const needsPatch = pageResult.mergedDuplicateMealPhotosCount > 0;'), true);
+  assert.equal(legacy.includes('action: needsPatch ? "merged_duplicates" : "no_files"'), true);
+});
+
 test('dropbox url normalization ignores raw/dl differences', () => {
   assert.equal(legacy.includes('u.searchParams.delete("raw")'), true);
   assert.equal(legacy.includes('u.searchParams.delete("dl")'), true);

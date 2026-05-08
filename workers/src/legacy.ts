@@ -1290,6 +1290,44 @@ const runMealPhotos = async (
   const duplicateCount = pageResult.duplicateCount;
   const existingFiles = existingState.existingFiles;
   const mealPhotosExistingFileCount = existingFiles.length - pageResult.mergedDuplicateMealPhotosCount;
+  if (targetFiles.length === 0) {
+    const needsPatch = pageResult.mergedDuplicateMealPhotosCount > 0;
+    if (needsPatch) {
+      const updateResult = await notionRequest(
+        `https://api.notion.com/v1/pages/${pageResult.pageId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            properties: {
+              [resolveMealPhotoProps(env).mealPhotosProp]: { files: existingFiles },
+            },
+          }),
+        },
+        env.NOTION_TOKEN,
+      );
+      if (!updateResult.ok) {
+        return { ok: false, error: "Notion API error", status: updateResult.status, detail: updateResult.text };
+      }
+    }
+    return {
+      ok: true,
+      date: targetDate,
+      action: needsPatch ? "merged_duplicates" : "no_files",
+      added: 0,
+      skipped: 0,
+      target_date: targetDate,
+      canonical_page_id: pageResult.pageId,
+      daily_log_duplicate_detected: pageResult.duplicateDetected,
+      duplicate_count: pageResult.duplicateCount,
+      meal_photos_existing_count: mealPhotosExistingFileCount,
+      meal_photos_added_count: 0,
+      meal_photos_merged_count: pageResult.mergedDuplicateMealPhotosCount,
+      title_prop_resolved: resolveMealPhotoProps(env).titleProp,
+      date_prop_resolved: resolveMealPhotoProps(env).dateProp,
+      target_date_prop_resolved: resolveMealPhotoProps(env).targetDateProp,
+      meal_photos_prop_resolved: resolveMealPhotoProps(env).mealPhotosProp,
+    };
+  }
   const dedupBypassedBecauseExistingEmpty =
     existingState.mealPhotosType === "files" && mealPhotosExistingFileCount === 0;
   const newFiles: NotionFileReference[] = [];
@@ -1389,7 +1427,7 @@ const runMealPhotos = async (
     return {
       ok: true,
       date: targetDate,
-      action: "no_new_files",
+      action: "no_files",
       added: 0,
       skipped,
       target_date: targetDate,
@@ -1603,41 +1641,3 @@ export const handleLegacyRoute = async (
 
   return null;
 };
-  if (targetFiles.length === 0) {
-    const needsPatch = pageResult.mergedDuplicateMealPhotosCount > 0;
-    if (needsPatch) {
-      const patchRes = await notionRequest(
-        `https://api.notion.com/v1/pages/${pageResult.pageId}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            properties: {
-              [resolveMealPhotoProps(env).mealPhotosProp]: { files: existingFiles },
-            },
-          }),
-        },
-        env.NOTION_TOKEN,
-      );
-      if (!patchRes.ok) {
-        return { ok: false, error: "Notion API error", status: patchRes.status, detail: patchRes.text };
-      }
-    }
-    return {
-      ok: true,
-      date: targetDate,
-      action: needsPatch ? "merged_duplicates" : "no_files",
-      added: 0,
-      skipped: 0,
-      target_date: targetDate,
-      canonical_page_id: pageResult.pageId,
-      daily_log_duplicate_detected: duplicateCount > 0,
-      duplicate_count: duplicateCount,
-      meal_photos_existing_count: mealPhotosExistingFileCount,
-      meal_photos_added_count: 0,
-      meal_photos_merged_count: pageResult.mergedDuplicateMealPhotosCount,
-      title_prop_resolved: resolveMealPhotoProps(env).titleProp,
-      date_prop_resolved: resolveMealPhotoProps(env).dateProp,
-      target_date_prop_resolved: resolveMealPhotoProps(env).targetDateProp,
-      meal_photos_prop_resolved: resolveMealPhotoProps(env).mealPhotosProp,
-    };
-  }
