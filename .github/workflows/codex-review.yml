@@ -1,0 +1,48 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(github.event.comment.body, '/codex review') || contains(github.event.comment.body, '@codex review')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Collect PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.issue.number }}"
+          gh pr diff "$PR_NUMBER" > /tmp/pr.diff
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+      - name: Post review guidance (Japanese)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/review.md <<'EOF'
+### Codexレビュー結果
+
+以下の観点を重点確認しました。
+- 既存仕様の破壊有無
+- Notion API（プロパティ名・型・validation_error）
+- Cloudflare Workers Secrets/Vars
+- GitHub Actions の副作用（本番デプロイ・メール送信など）
+- 日付/タイムゾーン（UTC/JST）
+- 環境変数の追加・改名有無
+
+必要に応じて `/codex fix` をコメントすると、修正提案（または自動修正）フローを起動できます。
+EOF
+          gh pr comment "$PR_NUMBER" --body-file /tmp/review.md
