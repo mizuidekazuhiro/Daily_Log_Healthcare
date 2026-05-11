@@ -165,3 +165,19 @@ test('aggregation uses DAILY_LOG_DB_ID, not HEALTH_DB_ID, and no DAILY_LOG_ANKI_
   assert.equal(aggBody.includes('DAILY_LOG_ANKI_SESSIONS_PROPERTY_NAME'), false);
   assert.equal(aggBody.includes('DAILY_LOG_ANKI_LAST_USED_AT_PROPERTY_NAME'), false);
 });
+
+
+
+test('aggregate Daily_Log creation prioritizes DAILY_LOG_* props and uses Japanese title format', async () => {
+  const fs = await import('node:fs/promises');
+  const src = await fs.readFile(new URL('../workers/src/services/app_usage_session_service.ts', import.meta.url), 'utf8');
+  const aggStart = src.indexOf('export const aggregateStudyUsageForTargetDate');
+  const aggBody = src.slice(aggStart);
+  assert.equal(aggBody.includes('env.DAILY_LOG_DATE_PROP ||'), true);
+  assert.equal(aggBody.includes('env.DAILY_LOG_TARGET_DATE_PROP ||'), true);
+  assert.equal(aggBody.includes('env.HEALTH_DATE_PROP ||'), true);
+  assert.equal(aggBody.includes('const titleProp = env.DAILY_LOG_TITLE_PROP || "名前";'), true);
+  assert.equal(aggBody.includes('`Daily Log｜${targetDate}`'), true);
+  assert.equal(aggBody.includes('[titleProp]: { title: [{ text: { content: `Daily Log｜${targetDate}` } }] }'), true);
+  assert.equal(aggBody.includes('[dateProp]: { date: { start: targetDate } }'), true);
+});
