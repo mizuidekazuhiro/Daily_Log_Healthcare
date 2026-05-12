@@ -15,7 +15,7 @@ export type AppUsageValidationOptions = {
 };
 
 const ISO_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-const DEFAULT_SESSION_MAX_MINUTES = 120;
+const DEFAULT_SESSION_MAX_MINUTES = 15;
 
 const unwrap = (v: any): any => (v && typeof v === "object" && "" in v ? unwrap(v[""]) : v);
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
@@ -105,18 +105,18 @@ export const validateAndComputeAppUsage = (
   const endMs = Date.parse(p.ended_at);
   if (endMs <= startMs) return { error: "ended_at must be later than started_at" };
 
-  let durationSeconds = Math.round((endMs - startMs) / 1000);
+  const durationSeconds = Math.round((endMs - startMs) / 1000);
   if (durationSeconds < 10) return { ignored: true, reason: "duration_below_minimum", duration_seconds: durationSeconds };
 
   const sessionMaxSeconds = getSessionMaxSeconds(options);
   if (durationSeconds > sessionMaxSeconds) {
-    console.log("APP_USAGE_SESSION_DURATION_CAPPED", {
+    console.log("APP_USAGE_SESSION_DURATION_ABOVE_MAX_IGNORED", {
       app: p.app,
       session_id: p.session_id,
-      original_duration_seconds: durationSeconds,
-      capped_duration_seconds: sessionMaxSeconds,
+      duration_seconds: durationSeconds,
+      max_duration_seconds: sessionMaxSeconds,
     });
-    durationSeconds = sessionMaxSeconds;
+    return { ignored: true, reason: "duration_above_maximum", duration_seconds: durationSeconds };
   }
 
   const target_date = getAppUsageTargetDateFromEndAt(p.ended_at, p.day_start_hour);
