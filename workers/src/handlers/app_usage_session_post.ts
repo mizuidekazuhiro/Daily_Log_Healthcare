@@ -1,13 +1,20 @@
 import type { Env } from "../types";
 import { errorResponse, jsonResponse } from "../utils/http";
 import { NotionApiError } from "../services/notion_client";
-import { normalizeAppUsagePayload, upsertAppUsageSession, validateAndComputeAppUsage } from "../services/app_usage_session_service";
+import {
+  getAppUsageSessionMaxMinutes,
+  normalizeAppUsagePayload,
+  upsertAppUsageSession,
+  validateAndComputeAppUsage,
+} from "../services/app_usage_session_service";
 
 export const handleAppUsageSessionPost = async (request: Request, env: Env): Promise<Response> => {
   try {
     const raw = await request.json();
     const normalized = normalizeAppUsagePayload(raw);
-    const computed: any = validateAndComputeAppUsage(normalized);
+    const computed: any = validateAndComputeAppUsage(normalized, {
+      sessionMaxMinutes: getAppUsageSessionMaxMinutes(env),
+    });
     if (computed.error) return errorResponse(400, computed.error);
     if (computed.ignored) return jsonResponse(200, { ok: true, ignored: true, reason: computed.reason, duration_seconds: computed.duration_seconds, daily_log_updated: false });
     const { upsert_mode } = await upsertAppUsageSession(env, normalized, computed);

@@ -12,6 +12,16 @@ export { normalizeAppUsagePayload, validateAndComputeAppUsage, getPreviousJstDat
 
 const prop = (env: Env, name: keyof Env, fallback: string) => (env[name] as string | undefined) || fallback;
 
+export const getAppUsageSessionMaxMinutes = (env: Env): number => {
+  const raw = env.APP_USAGE_SESSION_MAX_MINUTES;
+  const minutes = Number(raw);
+  if (raw !== undefined && (!Number.isFinite(minutes) || minutes <= 0)) {
+    console.warn("APP_USAGE_SESSION_MAX_MINUTES_INVALID", { value: raw, fallback_minutes: 15 });
+    return 15;
+  }
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
+};
+
 const getAppUsageProps = (env: Env) => ({
   name: prop(env, "APP_USAGE_NAME_PROPERTY_NAME", "Name"),
   app: prop(env, "APP_USAGE_APP_PROPERTY_NAME", "App"),
