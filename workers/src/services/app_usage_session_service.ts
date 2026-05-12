@@ -16,10 +16,10 @@ export const getAppUsageSessionMaxMinutes = (env: Env): number => {
   const raw = env.APP_USAGE_SESSION_MAX_MINUTES;
   const minutes = Number(raw);
   if (raw !== undefined && (!Number.isFinite(minutes) || minutes <= 0)) {
-    console.warn("APP_USAGE_SESSION_MAX_MINUTES_INVALID", { value: raw, fallback_minutes: 120 });
-    return 120;
+    console.warn("APP_USAGE_SESSION_MAX_MINUTES_INVALID", { value: raw, fallback_minutes: 15 });
+    return 15;
   }
-  return Number.isFinite(minutes) && minutes > 0 ? minutes : 120;
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
 };
 
 const getAppUsageProps = (env: Env) => ({
