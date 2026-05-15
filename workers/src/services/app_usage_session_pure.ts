@@ -25,7 +25,8 @@ const hasControlChars = (value: string): boolean => [...value].some((ch) => {
   return code < 32 || code === 127;
 });
 
-const getSessionMaxSeconds = (options?: AppUsageValidationOptions): number => {
+const getSessionMaxSeconds = (options?: AppUsageValidationOptions): number | null => {
+  if (options?.sessionMaxMinutes === null) return null;
   const minutes = Number(options?.sessionMaxMinutes);
   const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_SESSION_MAX_MINUTES;
   return Math.round(safeMinutes * 60);
@@ -109,7 +110,7 @@ export const validateAndComputeAppUsage = (
   if (durationSeconds < 10) return { ignored: true, reason: "duration_below_minimum", duration_seconds: durationSeconds };
 
   const sessionMaxSeconds = getSessionMaxSeconds(options);
-  if (durationSeconds > sessionMaxSeconds) {
+  if (sessionMaxSeconds !== null && durationSeconds > sessionMaxSeconds) {
     console.log("APP_USAGE_SESSION_DURATION_ABOVE_MAX_IGNORED", {
       app: p.app,
       session_id: p.session_id,
