@@ -12,8 +12,9 @@ export const handleAppUsageSessionPost = async (request: Request, env: Env): Pro
   try {
     const raw = await request.json();
     const normalized = normalizeAppUsagePayload(raw);
+    const isAnki = normalized.app.trim().toLowerCase() === "anki";
     const computed: any = validateAndComputeAppUsage(normalized, {
-      sessionMaxMinutes: getAppUsageSessionMaxMinutes(env),
+      sessionMaxMinutes: isAnki ? getAppUsageSessionMaxMinutes(env) : null,
     });
     if (computed.error) return errorResponse(400, computed.error);
     if (computed.ignored) return jsonResponse(200, { ok: true, ignored: true, reason: computed.reason, duration_seconds: computed.duration_seconds, daily_log_updated: false });

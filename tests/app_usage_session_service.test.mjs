@@ -11,7 +11,7 @@ const base = {
 
 test('target date after 03:00 JST is same day', () => {
   const n = normalizeAppUsagePayload({ ...base, ended_at: '2026-05-06T14:05:00+09:00' });
-  const r = validateAndComputeAppUsage(n);
+  const r = validateAndComputeAppUsage(n, { sessionMaxMinutes: null });
   assert.equal(r.target_date, '2026-05-06');
 });
 
@@ -19,14 +19,14 @@ test('target date after 03:00 JST is same day', () => {
 
 test('target date handles midnight hour as previous day when day_start_hour is 3', () => {
   const n = normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T00:00:00+09:00', ended_at: '2026-05-06T00:30:00+09:00', day_start_hour: 3 });
-  const r = validateAndComputeAppUsage(n);
+  const r = validateAndComputeAppUsage(n, { sessionMaxMinutes: null });
   assert.equal(r.target_date, '2026-05-05');
 });
 
 
 test('target date before 03:00 JST is previous day', () => {
   const n = normalizeAppUsagePayload({ ...base, ended_at: '2026-05-06T02:05:00+09:00' });
-  const r = validateAndComputeAppUsage(n);
+  const r = validateAndComputeAppUsage(n, { sessionMaxMinutes: null });
   assert.equal(r.target_date, '2026-05-05');
 });
 
@@ -62,14 +62,17 @@ test('90 seconds is recorded with duration_min = 1.5', () => {
   assert.equal(r.duration_min, 1.5);
 });
 
-test('duration above six hours is capped', () => {
-  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T00:00:00+09:00', ended_at: '2026-05-06T10:00:00+09:00' }));
-  assert.equal(r.duration_seconds, 21600);
+test('duration above six hours is recorded when max is disabled', () => {
+  const r = validateAndComputeAppUsage(
+    normalizeAppUsagePayload({ ...base, started_at: '2026-05-06T00:00:00+09:00', ended_at: '2026-05-06T10:00:00+09:00' }),
+    { sessionMaxMinutes: null },
+  );
+  assert.equal(r.duration_seconds, 36000);
 });
 
 test('payload duration mismatch uses computed duration', () => {
   const n = normalizeAppUsagePayload({ ...base, duration_seconds: 1 });
-  const r = validateAndComputeAppUsage(n);
+  const r = validateAndComputeAppUsage(n, { sessionMaxMinutes: null });
   assert.equal(r.duration_seconds, 2400);
 });
 
@@ -80,6 +83,28 @@ test('normalization handles iOS Shortcuts nested dictionary shape', () => {
 });
 
 
+
+
+test('Anki 20 minutes is ignored as duration_above_maximum', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Anki', started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:20:00+09:00' }));
+  assert.equal(r.ignored, true);
+  assert.equal(r.reason, 'duration_above_maximum');
+});
+
+test('Anki 15 minutes exactly is recorded', () => {
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Anki', started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:15:00+09:00' }));
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_seconds, 900);
+});
+
+test('Itojuku 40 minutes is recorded when max is disabled', () => {
+  const r = validateAndComputeAppUsage(
+    normalizeAppUsagePayload({ ...base, app: 'Itojuku', started_at: '2026-05-06T10:00:00+09:00', ended_at: '2026-05-06T10:40:00+09:00' }),
+    { sessionMaxMinutes: null },
+  );
+  assert.equal(r.ignored, false);
+  assert.equal(r.duration_seconds, 2400);
+});
 test('aggregation dedupes duplicate Session ID rows and latest edited wins', () => {
   const rows = [
     {
@@ -113,7 +138,7 @@ test('previous JST date helper uses scheduled UTC time correctly', () => {
 
 
 test('non-Anki app "NotebookLM" is accepted', () => {
-  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'NotebookLM' }));
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'NotebookLM' }), { sessionMaxMinutes: null });
   assert.equal(r.error, undefined);
 });
 
@@ -150,7 +175,7 @@ test('aggregation includes multiple app names', () => {
 
 
 test('non-Anki app "Itojuku" is accepted', () => {
-  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Itojuku' }));
+  const r = validateAndComputeAppUsage(normalizeAppUsagePayload({ ...base, app: 'Itojuku' }), { sessionMaxMinutes: null });
   assert.equal(r.error, undefined);
 });
 
