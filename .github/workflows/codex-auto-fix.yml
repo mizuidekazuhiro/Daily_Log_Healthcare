@@ -1,0 +1,123 @@
+name: Codex Auto Fix Loop
+
+on:
+  workflow_run:
+    workflows: ["*"]
+    types: [completed]
+  pull_request:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "対象PR番号（任意）"
+        required: false
+        type: string
+      run_id:
+        description: "対象workflow run id（任意）"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+  checks: read
+
+jobs:
+  prepare-context:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'codex:auto-fix') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(github.event.comment.body, '/codex fix') || contains(github.event.comment.body, '@codex fix') || contains(github.event.comment.body, '/codex explain') || contains(github.event.comment.body, '/codex plan'))) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.ctx.outputs.should_run }}
+      run_mode: ${{ steps.ctx.outputs.run_mode }}
+      run_id: ${{ steps.ctx.outputs.run_id }}
+      pr_number: ${{ steps.ctx.outputs.pr_number }}
+      head_branch: ${{ steps.ctx.outputs.head_branch }}
+      workflow_name: ${{ steps.ctx.outputs.workflow_name }}
+      attempt: ${{ steps.guard.outputs.attempt }}
+      can_fix: ${{ steps.guard.outputs.can_fix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect CI failure context
+        id: ctx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          REPO: ${{ github.repository }}
+        run: node scripts/collect_ci_failure_context.mjs
+      - name: Guard auto fix attempt count
+        id: guard
+        if: ${{ steps.ctx.outputs.should_run == 'true' && steps.ctx.outputs.run_mode == 'fix' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          RUN_ID: ${{ steps.ctx.outputs.run_id }}
+          REPO: ${{ github.repository }}
+        run: node scripts/codex_autofix_guard.mjs
+
+  codex-action:
+    needs: prepare-context
+    if: ${{ needs.prepare-context.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-context.outputs.head_branch }}
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Collect recent diff and test config
+        run: |
+          mkdir -p .codex-context
+          git log --oneline -n 10 > .codex-context/recent-commits.txt
+          git diff --name-status origin/${{ github.event.repository.default_branch }}...HEAD > .codex-context/recent-diff.txt || true
+          cat package.json > .codex-context/package.json.snapshot
+          sed -n '1,220p' README.md > .codex-context/readme-summary.md
+      - name: Explain only
+        if: ${{ needs.prepare-context.outputs.run_mode == 'explain' || needs.prepare-context.outputs.run_mode == 'plan' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ needs.prepare-context.outputs.run_mode }}
+          PR_NUMBER: ${{ needs.prepare-context.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ needs.prepare-context.outputs.run_id }}
+          WORKFLOW_NAME: ${{ needs.prepare-context.outputs.workflow_name }}
+        run: node scripts/create_autofix_issue.mjs
+      - name: Stop when retry limit exceeded
+        if: ${{ needs.prepare-context.outputs.run_mode == 'fix' && needs.prepare-context.outputs.can_fix == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: stop
+          PR_NUMBER: ${{ needs.prepare-context.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ needs.prepare-context.outputs.run_id }}
+          WORKFLOW_NAME: ${{ needs.prepare-context.outputs.workflow_name }}
+          ATTEMPT: ${{ needs.prepare-context.outputs.attempt }}
+        run: node scripts/create_autofix_issue.mjs
+      - name: Run codex auto fix
+        if: ${{ needs.prepare-context.outputs.run_mode == 'fix' && needs.prepare-context.outputs.can_fix == 'true' }}
+        env:
+          PR_NUMBER: ${{ needs.prepare-context.outputs.pr_number }}
+          RUN_ID: ${{ needs.prepare-context.outputs.run_id }}
+          WORKFLOW_NAME: ${{ needs.prepare-context.outputs.workflow_name }}
+        run: |
+          echo "Codex CLI/action integration point"
+          echo "branch: codex/autofix-pr-${PR_NUMBER:-$RUN_ID}"
+          echo "ここで失敗ログ・差分・README要約をCodexへ渡して修正を実施する"
+      - name: Run test suite (safe scope)
+        if: ${{ needs.prepare-context.outputs.run_mode == 'fix' && needs.prepare-context.outputs.can_fix == 'true' }}
+        run: npm test

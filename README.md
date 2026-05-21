@@ -637,3 +637,50 @@ DAILY_LOG_DATE_PROP=Date
 DAILY_LOG_MEAL_PHOTOS_PROP=Meal Photos
 DAILY_LOG_SOURCE_PROP=Source
 ```
+
+---
+
+## Codex自動修正ループ（GitHub Actions）
+
+### 概要
+- CI失敗、`codex:auto-fix` ラベル、`/codex fix` コメント、手動実行を起点に、Codex自動修正フローを起動します。
+- 失敗ログ・PR差分・README要約・テスト構成をコンテキストとして渡し、最小修正を優先します。
+- 自動マージは行いません。最終判断は必ず人間が行います。
+
+### 追加したworkflow
+- `.github/workflows/codex-auto-fix.yml`
+  - トリガー: `workflow_run(failure on pull_request)` / `pull_request(labeled)` / `issue_comment` / `workflow_dispatch`
+  - コメントコマンド:
+    - `/codex fix`（修正）
+    - `/codex explain`（原因説明のみ）
+    - `/codex plan`（修正計画のみ）
+- `.github/workflows/codex-review.yml`
+  - トリガー: `pull_request`作成・更新、`/codex review` コメント
+  - 仕様破壊リスク、Notion/Cloudflare/Secrets/UTC-JST 重点レビュー（コメントのみ）
+
+### 自動修正の上限
+- 同一失敗系統に対する自動修正は最大2回。
+- 3回目以降は自動修正を停止し、PRコメント＋Issue作成で人間へエスカレーションします。
+
+### 必要なGitHub Secrets
+- `GITHUB_TOKEN`（Actions標準）
+- （将来のCodex API連携時）`CODEX_API_KEY` 等、実装先の要件に応じて追加
+
+### 必要permissions（最小）
+- `contents: write`
+- `pull-requests: write`
+- `issues: write`
+- `actions: read`
+- `checks: read`
+
+### 自動マージしない理由
+- Notion/Cloudflare/外部APIは環境依存要因が大きく、コード修正だけでは妥当性を保証できないため。
+
+### 外部副作用を避ける方針
+- CI内で本番デプロイ、Notion本番書込、メール送信を勝手に実行しません。
+
+### 手動確認が必要なケース
+- NotionのDBプロパティ不足・型不一致（`validation_error`）
+- Cloudflare WorkersのSecrets/Vars未設定
+- GitHub Secrets不足
+- 外部API資格情報失効
