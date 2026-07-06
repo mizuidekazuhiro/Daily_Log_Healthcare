@@ -2,13 +2,19 @@ import type { Env } from "../types";
 import { notionFetch, queryDatabaseAll } from "./notion_client";
 import {
   aggregateStudyRowsDedupBySessionId,
+  getAppUsageJstWindowForTargetDate,
   normalizeAppUsagePayload,
   validateAndComputeAppUsage,
   getPreviousJstDateFrom,
   type NormalizedAppUsage,
 } from "./app_usage_session_pure";
 
-export { normalizeAppUsagePayload, validateAndComputeAppUsage, getPreviousJstDateFrom };
+export {
+  getAppUsageJstWindowForTargetDate,
+  normalizeAppUsagePayload,
+  validateAndComputeAppUsage,
+  getPreviousJstDateFrom,
+};
 
 const prop = (env: Env, name: keyof Env, fallback: string) => (env[name] as string | undefined) || fallback;
 
@@ -20,6 +26,16 @@ export const getAppUsageSessionMaxMinutes = (env: Env): number => {
     return 15;
   }
   return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
+};
+
+export const getAppUsageDayStartHour = (env: Env): number => {
+  const raw = env.APP_USAGE_DAY_START_HOUR;
+  const hour = Number(raw);
+  if (raw !== undefined && (!Number.isInteger(hour) || hour < 0 || hour > 23)) {
+    console.warn("APP_USAGE_DAY_START_HOUR_INVALID", { value: raw, fallback_hour: 3 });
+    return 3;
+  }
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 3;
 };
 
 const getAppUsageProps = (env: Env) => ({
@@ -68,8 +84,28 @@ export const aggregateStudyUsageForTargetDate = async (env: Env, targetDate: str
   if (!dailyDbId) throw new Error("Missing DAILY_LOG_DB_ID");
 
   const appProp = getAppUsageProps(env);
-  const rows = await queryDatabaseAll(env, appDbId, { filter: { property: appProp.targetDate, date: { equals: targetDate } } });
-  const aggregate = aggregateStudyRowsDedupBySessionId(rows, { sessionId: appProp.sessionId, durationMin: appProp.durationMin, endAt: appProp.endAt }, targetDate);
+  const dayStartHour = getAppUsageDayStartHour(env);
+  const window = getAppUsageJstWindowForTargetDate(targetDate, dayStartHour);
+  const rows = await queryDatabaseAll(env, appDbId, {
+    filter: {
+      and: [
+        { property: appProp.startAt, date: { on_or_after: window.start } },
+        { property: appProp.startAt, date: { before: window.end } },
+      ],
+    },
+  });
+  const aggregate = aggregateStudyRowsDedupBySessionId(
+    rows,
+    {
+      sessionId: appProp.sessionId,
+      durationMin: appProp.durationMin,
+      endAt: appProp.endAt,
+      app: appProp.app,
+      startAt: appProp.startAt,
+      device: appProp.device,
+    },
+    targetDate,
+  );
 
   const dateProp =
     env.DAILY_LOG_DATE_PROP ||
