@@ -29,7 +29,7 @@ export const getAppUsageSessionMaxMinutes = (env: Env): number => {
 };
 
 export const getAppUsageDayStartHour = (env: Env): number => {
-  const raw = env.APP_USAGE_DAY_START_HOUR;
+  const raw = (env as any).APP_USAGE_DAY_START_HOUR;
   const hour = Number(raw);
   if (raw !== undefined && (!Number.isInteger(hour) || hour < 0 || hour > 23)) {
     console.warn("APP_USAGE_DAY_START_HOUR_INVALID", { value: raw, fallback_hour: 3 });
