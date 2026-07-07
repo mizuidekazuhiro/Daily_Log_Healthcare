@@ -28,15 +28,7 @@ export const getAppUsageSessionMaxMinutes = (env: Env): number => {
   return Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
 };
 
-export const getAppUsageDayStartHour = (env: Env): number => {
-  const raw = (env as any).APP_USAGE_DAY_START_HOUR;
-  const hour = Number(raw);
-  if (raw !== undefined && (!Number.isInteger(hour) || hour < 0 || hour > 23)) {
-    console.warn("APP_USAGE_DAY_START_HOUR_INVALID", { value: raw, fallback_hour: 4 });
-    return 4;
-  }
-  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 4;
-};
+export const getAppUsageDayStartHour = (_env: Env): number => 4;
 
 const getAppUsageProps = (env: Env) => ({
   name: prop(env, "APP_USAGE_NAME_PROPERTY_NAME", "Name"),
