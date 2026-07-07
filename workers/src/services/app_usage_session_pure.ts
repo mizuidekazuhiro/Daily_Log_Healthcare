@@ -16,7 +16,7 @@ export type AppUsageValidationOptions = {
 
 const ISO_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const DEFAULT_SESSION_MAX_MINUTES = 15;
-const DEFAULT_DAY_START_HOUR = 3;
+const DEFAULT_DAY_START_HOUR = 4;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -69,8 +69,8 @@ export const getAppUsageTargetDateFromStartAt = (startedAt: string, dayStartHour
  * Backward-compatible alias for older callers.
  *
  * New app usage records should use Start At as the ownership key so that
- * a session beginning before 03:00 JST remains on the previous target date,
- * even if it ends after 03:00.
+ * a session beginning before 04:00 JST remains on the previous target date,
+ * even if it ends after 04:00.
  */
 export const getAppUsageTargetDateFromEndAt = (endedAt: string, dayStartHour: number): string => {
   return formatJstUsageDateFromMs(Date.parse(endedAt), normalizeDayStartHour(dayStartHour));
