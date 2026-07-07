@@ -32,10 +32,10 @@ export const getAppUsageDayStartHour = (env: Env): number => {
   const raw = (env as any).APP_USAGE_DAY_START_HOUR;
   const hour = Number(raw);
   if (raw !== undefined && (!Number.isInteger(hour) || hour < 0 || hour > 23)) {
-    console.warn("APP_USAGE_DAY_START_HOUR_INVALID", { value: raw, fallback_hour: 3 });
-    return 3;
+    console.warn("APP_USAGE_DAY_START_HOUR_INVALID", { value: raw, fallback_hour: 4 });
+    return 4;
   }
-  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 3;
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 4;
 };
 
 const getAppUsageProps = (env: Env) => ({
