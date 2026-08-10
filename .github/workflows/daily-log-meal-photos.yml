@@ -3,7 +3,7 @@ name: Daily Log Meal Photos
 on:
   schedule:
   # 05:21 JST = 20:21 UTC (previous day)
-  - cron: "21 20 * * 0-6"
+  - cron: "21 20 * * *"
   workflow_dispatch:
     inputs:
       execution_date:
