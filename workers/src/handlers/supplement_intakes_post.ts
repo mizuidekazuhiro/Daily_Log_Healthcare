@@ -1,6 +1,5 @@
 import type { Env, PostIntakesRequest, PostIntakesResponse } from "../types";
 import { createIntakeLogs } from "../services/intake_log_service";
-import { getOrCreateDailyHealthPageId } from "../services/daily_health_service";
 import { getJstDateString } from "../utils/datetime";
 import { badRequest, errorResponse, jsonResponse, readJson } from "../utils/http";
 import { getNotionErrorDetails, NotionApiError } from "../services/notion_client";
@@ -54,17 +53,15 @@ export const handleSupplementIntakesPost = async (
       count: body.supplement_ids.length,
     });
 
-    const dailyHealthPageId = await getOrCreateDailyHealthPageId(env, dailyDate);
     const result = await createIntakeLogs(
       env,
-      dailyHealthPageId,
       body.taken_at,
       body.supplement_ids,
       body.source,
     );
 
     const response: PostIntakesResponse = {
-      daily_health_page_id: dailyHealthPageId,
+      daily_health_page_id: "",
       created: result.created,
       skipped: result.skipped,
     };
