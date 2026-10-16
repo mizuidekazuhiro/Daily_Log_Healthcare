@@ -37,7 +37,7 @@ npm install
 
 ### 3. Notion 側で必要なデータベース列を作る
 
-`/api/health/daily` で使う列名は **完全一致** で以下を用意してください。既存クライアントとの後方互換性は維持されており、新規追加項目はすべて任意です。値が存在するものだけ保存され、欠けている項目・空文字・`null`・`undefined`・parse 不能な数値はその項目だけスキップされます。
+`/api/health/daily` で使う列名は **完全一致** で以下を用意してください。新規追加項目は個別にはすべて任意です。値が存在するものだけ保存され、欠けている項目・空文字・`null`・`undefined`・parse 不能な数値はその項目だけスキップされます。有効な数値実測項目も睡眠開始/終了時刻もない場合は `422 / health_measurements_empty` となり、Notionページを作成・更新しません。
 
 ### 推奨Notion列一覧
 
@@ -189,11 +189,12 @@ npm run deploy
 
 - `/api/health/daily` は `HEALTH_DB_ID` を使う場合、Health condition DB に書き込む前提（`HEALTH_DB_ID` 優先、未設定時のみ `DAILY_LOG_DB_ID` を使用）
 - `Date` をキーに Notion の既存ページを検索
+- 数値の実測項目または有効な `sleep_start` / `sleep_end` が1つもない場合は、Notionへアクセスせず `422` / `error_code=health_measurements_empty` を返す。`date` / `source` / `sleep_source` / `readiness_label` だけの送信ではページ作成・更新を成功扱いにしない
 - 既存ページがあれば PATCH、なければ CREATE
 - `null` / `undefined` / 空文字の項目は Notion に書き込まない
 - 数値項目が未送信、`null`、`undefined`、空文字、parse 不能な場合はその項目だけを無視して全体処理は継続する
 - `sleep_percent` / `rem_percent` / `deep_percent` / `heart_rate_percent` は API では 135 のような値を受け取り、Notion 保存直前に `/100` して Number プロパティへ保存する
-- 追加項目はすべて任意で、欠けていても 4xx にしない
+- 追加項目は個別にはすべて任意。有効な実測項目が1つ以上あれば、その他の欠測項目を理由に 4xx にしない。体重のみ、栄養のみ、睡眠時刻のみの部分更新も維持する
 - 受信 payload に含まれている値だけを保存し、欠けている値は単にスキップする
 - `readiness_label` は空でない場合のみ `Readiness Label` に `{ rich_text: [{ type: "text", text: { content } }] }` 形式で保存する
 - 既存の `weight` / `protein` / `fat` / `carb` / `kcal` / `source` / 睡眠項目の挙動は維持する
@@ -469,7 +470,7 @@ Dropbox の **access token は期限切れ** になります。固定 token を�
 ## Migration note (for developers)
 
 - `/api/health/daily` は新規追加の sleep/readiness 項目を optional として受け付けます。
-- 既存クライアントは payload を変更しなくてもそのまま利用できます。
+- 有効な実測値を送る既存クライアントは payload を変更しなくてもそのまま利用できます。実測値が皆無の送信は `422 / health_measurements_empty` になるため、端末側でHTTP statusと `ok` を確認してください。
 - Notion 側では `REM Duration Min` から `Readiness Label` までの新規列を追加してください。特に `Readiness Label` は rich_text 型で作成してください。
 - 数値の追加項目は parse 不能でもリクエスト全体は失敗せず、その項目だけスキップされます。
 - `sleep_start` / `sleep_end` は従来どおり ISO 8601 が必要です。
