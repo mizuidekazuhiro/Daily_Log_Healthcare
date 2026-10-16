@@ -405,7 +405,7 @@ export const upsertHealthDailyPage = async (
   notionRequest: NotionRequestFn,
 ): Promise<
   | { ok: true; action: "updated" | "created"; date: string }
-  | { ok: false; status: number; body: { ok: false; error: string; status: number; detail: string } }
+  | { ok: false; status: number; body: { ok: false; error: string; status: number; detail: string; error_code?: string } }
 > => {
   const databaseId = getHealthDatabaseId(env);
   if (!databaseId) {
@@ -422,6 +422,27 @@ export const upsertHealthDailyPage = async (
   }
 
   const date = (payload.date ?? "").trim();
+  // Metadata alone must not create an empty Health page or report an update.
+  // Keep all measurements optional individually, including weight-only updates.
+  const hasMeasurement = NUMERIC_FIELDS.some(({ payloadKey }) => isFiniteNumber(payload[payloadKey]))
+    || DATE_FIELDS.some(({ payloadKey }) => {
+      const value = payload[payloadKey];
+      return typeof value === "string" && isIso8601DateTimeString(value);
+    });
+  if (!hasMeasurement) {
+    console.warn("HEALTH_DAILY_NO_MEASUREMENTS", { date, error_code: "health_measurements_empty" });
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        ok: false,
+        error: "No Health measurements supplied",
+        status: 422,
+        error_code: "health_measurements_empty",
+        detail: "Send at least one numeric Health measurement or a valid sleep_start/sleep_end. Metadata alone is not a Health update.",
+      },
+    };
+  }
   const partialProps = buildHealthPartialProps(payload);
   const dateProp = getHealthDateProp(env);
   const titleProp = getHealthTitleProp(env);
