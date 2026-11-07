@@ -18,12 +18,13 @@ jobs:
           request = urllib.request.Request(
               'https://daily-log-healthcare.kazuhiro-mizuide.workers.dev/api/health/daily',
               data=json.dumps({'date': datetime.date.today().isoformat(), 'source':'verification'}).encode(),
-              headers={'Content-Type':'application/json', 'Authorization':'Bearer '+os.environ['HEALTH_API_KEY']}, method='POST')
+              headers={'Content-Type':'application/json', 'Authorization':'Bearer '+os.environ['HEALTH_API_KEY'], 'User-Agent':'NotionDiaryAutomation/2.0'}, method='POST')
           try:
               response=urllib.request.urlopen(request, timeout=30)
           except urllib.error.HTTPError as error:
               response=error
           status=response.status
+          print(json.dumps({'status':status,'content_type':response.headers.get('Content-Type')}))
           payload=json.loads(response.read())
           code=payload.get('error_code')
           print(json.dumps({'status':status,'error_code':code,'expected_notion_writes':0}))
