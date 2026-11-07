@@ -349,8 +349,10 @@ export const buildHealthPartialProps = (
 ): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
 
-  for (const { payloadKey, notionProp, scalePercent } of NUMERIC_FIELDS) {
-    assignNumberProp(props, notionProp, payload[payloadKey], { scalePercent });
+  for (const field of NUMERIC_FIELDS) {
+    assignNumberProp(props, field.notionProp, payload[field.payloadKey], {
+      scalePercent: "scalePercent" in field ? field.scalePercent : false,
+    });
   }
 
   for (const { payloadKey, notionProp } of DATE_FIELDS) {
@@ -385,7 +387,8 @@ const buildNotionPropertyErrorContext = (
 ) => ({
   operation,
   propertyNames,
-  payload,
+  // Keep field names for diagnosis; never log personal measurement values.
+  submittedFields: Object.keys(payload),
 });
 
 const logNotionPropertyError = (
@@ -395,7 +398,7 @@ const logNotionPropertyError = (
   console.error("HEALTH_DAILY_NOTION_PROPERTY_ERROR", {
     ...context,
     status: result.status,
-    detailPreview: result.text.slice(0, 500),
+    errorCode: "notion_property_error",
   });
 };
 
@@ -405,7 +408,7 @@ export const upsertHealthDailyPage = async (
   notionRequest: NotionRequestFn,
 ): Promise<
   | { ok: true; action: "updated" | "created"; date: string }
-  | { ok: false; status: number; body: { ok: false; error: string; status: number; detail: string } }
+  | { ok: false; status: number; body: { ok: false; error: string; status: number; detail: string; error_code?: string } }
 > => {
   const databaseId = getHealthDatabaseId(env);
   if (!databaseId) {
@@ -422,6 +425,27 @@ export const upsertHealthDailyPage = async (
   }
 
   const date = (payload.date ?? "").trim();
+  // Metadata alone must not create an empty Health page or report an update.
+  // Keep all measurements optional individually, including weight-only updates.
+  const hasMeasurement = NUMERIC_FIELDS.some(({ payloadKey }) => isFiniteNumber(payload[payloadKey]))
+    || DATE_FIELDS.some(({ payloadKey }) => {
+      const value = payload[payloadKey];
+      return typeof value === "string" && isIso8601DateTimeString(value);
+    });
+  if (!hasMeasurement) {
+    console.warn("HEALTH_DAILY_NO_MEASUREMENTS", { date, error_code: "health_measurements_empty" });
+    return {
+      ok: false,
+      status: 422,
+      body: {
+        ok: false,
+        error: "No Health measurements supplied",
+        status: 422,
+        error_code: "health_measurements_empty",
+        detail: "Send at least one numeric Health measurement or a valid sleep_start/sleep_end. Metadata alone is not a Health update.",
+      },
+    };
+  }
   const partialProps = buildHealthPartialProps(payload);
   const dateProp = getHealthDateProp(env);
   const titleProp = getHealthTitleProp(env);

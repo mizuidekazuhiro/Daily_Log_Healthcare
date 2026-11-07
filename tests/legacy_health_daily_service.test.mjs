@@ -7,6 +7,7 @@ const {
   normalizeHealthPayload,
   validateHealthPayload,
   buildHealthPartialProps,
+  upsertHealthDailyPage,
 } = service;
 
 test('succeeds when no new optional fields are sent', () => {
@@ -114,3 +115,55 @@ test('still validates sleep_start and sleep_end as ISO 8601 when present', () =>
     'sleep_start must be an ISO 8601 datetime string',
   );
 });
+
+const env = { NOTION_TOKEN: 'test-token', HEALTH_DB_ID: 'health-db' };
+
+for (const [name, input] of [
+  ['date only', { date: '2026-10-14' }],
+  ['metadata only', { date: '2026-10-14', source: 'healthkit', sleep_source: 'autosleep', readiness_label: 'OK' }],
+  ['empty and unparseable values', { date: '2026-10-14', source: 'healthkit', sleep_duration_min: '', sleep_score: 'invalid', readiness_hrv: null, kcal: {} }],
+  ['nested empty Shortcut values', { '': { date: { '': '2026-10-14' }, source: { '': 'healthkit' }, sleep_duration_min: { '': '' } } }],
+]) {
+  test(`rejects ${name} before querying or mutating Notion`, async () => {
+    const payload = normalizeHealthPayload(input);
+    assert.equal(validateHealthPayload(payload), null);
+    let calls = 0;
+    const result = await upsertHealthDailyPage(env, payload, async () => {
+      calls += 1;
+      throw new Error('empty input must not reach Notion');
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 422);
+    assert.equal(result.body.error_code, 'health_measurements_empty');
+    assert.equal(calls, 0);
+    assert.equal(JSON.stringify(result.body).includes('healthkit'), false);
+  });
+}
+
+for (const existing of [false, true]) {
+  for (const [field, value, property, saved] of [
+    ['sleep_duration_min', '374', 'Sleep Duration Min', { number: 374 }],
+    ['weight', 60, 'Weight', { number: 60 }],
+    ['kcal', 0, 'Kcal', { number: 0 }],
+    ['rem_duration_min', 45, 'REM Duration Min', { number: 45 }],
+    ['sleep_start', '2026-10-13T23:00:00+09:00', 'Sleep Start', { date: { start: '2026-10-13T23:00:00+09:00' } }],
+  ]) {
+    test(`${existing ? 'updates' : 'creates'} valid ${field}-only input without filling missing values`, async () => {
+      const payload = normalizeHealthPayload({ date: '2026-10-14', [field]: value });
+      assert.equal(validateHealthPayload(payload), null);
+      const calls = [];
+      const result = await upsertHealthDailyPage(env, payload, async (url, options) => {
+        calls.push({ url, ...options, body: JSON.parse(options.body) });
+        return { ok: true, json: calls.length === 1 ? { results: existing ? [{ id: 'existing-page' }] : [] } : { id: 'new-page' } };
+      });
+      assert.deepEqual(result, { ok: true, action: existing ? 'updated' : 'created', date: '2026-10-14' });
+      assert.equal(calls.length, 2);
+      assert.ok(calls[0].url.endsWith('/databases/health-db/query'));
+      assert.deepEqual(calls[0].body.filter, { property: 'Date', date: { equals: '2026-10-14' } });
+      assert.equal(calls[1].method, existing ? 'PATCH' : 'POST');
+      const properties = calls[1].body.properties;
+      assert.deepEqual(properties[property], saved);
+      assert.deepEqual(Object.keys(properties).sort(), existing ? [property] : ['Name', 'Date', property].sort());
+    });
+  }
+}

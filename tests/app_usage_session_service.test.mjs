@@ -12,7 +12,8 @@ const base = {
 test('target date after 03:00 JST is same day', () => {
   const n = normalizeAppUsagePayload({ ...base, ended_at: '2026-05-06T14:05:00+09:00' });
   const r = validateAndComputeAppUsage(n, { sessionMaxMinutes: null });
-  assert.equal(r.target_date, '2026-05-06');
+  // A session belongs to the study day of its start, even if it ends after the boundary.
+  assert.equal(r.target_date, '2026-05-05');
 });
 
 
@@ -133,7 +134,8 @@ test('aggregation dedupes duplicate Session ID rows and latest edited wins', () 
 
 test('previous JST date helper uses scheduled UTC time correctly', () => {
   const r = getPreviousJstDateFrom(Date.parse('2026-05-06T18:00:00Z'));
-  assert.equal(r, '2026-05-06');
+  assert.equal(r, '2026-05-05');
+  assert.equal(getPreviousJstDateFrom(Date.parse('2026-05-06T19:00:00Z')), '2026-05-06');
 });
 
 
