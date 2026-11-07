@@ -1,0 +1,32 @@
+name: Verify Health empty-input guard
+on:
+  workflow_dispatch:
+  push:
+    branches: ["chore/health-production-verification"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify metadata-only request has no write
+        env:
+          HEALTH_API_KEY: ${{ secrets.HEALTH_API_KEY }}
+        run: |
+          python - <<'PY'
+          import datetime, json, os, urllib.request, urllib.error
+          request = urllib.request.Request(
+              'https://daily-log-healthcare.kazuhiro-mizuide.workers.dev/api/health/daily',
+              data=json.dumps({'date': datetime.date.today().isoformat(), 'source':'verification'}).encode(),
+              headers={'Content-Type':'application/json', 'Authorization':'Bearer '+os.environ['HEALTH_API_KEY'], 'User-Agent':'NotionDiaryAutomation/2.0'}, method='POST')
+          try:
+              response=urllib.request.urlopen(request, timeout=30)
+          except urllib.error.HTTPError as error:
+              response=error
+          status=response.status
+          print(json.dumps({'status':status,'content_type':response.headers.get('Content-Type')}))
+          payload=json.loads(response.read())
+          code=payload.get('error_code')
+          print(json.dumps({'status':status,'error_code':code,'expected_notion_writes':0}))
+          assert status==422 and code=='health_measurements_empty'
+          PY
