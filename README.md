@@ -477,7 +477,9 @@ Dropbox の **access token は期限切れ** になります。固定 token を�
 
 ## 変更ファイルの一覧と変更理由
 
-- `workers/src/services/legacy_health_daily_service.ts`: `/api/health/daily` の optional 項目追加、正規化、バリデーション、Notion プロパティ構築を更新。
+- `workers/src/services/legacy_health_daily_pure.ts`: `/api/health/daily` の項目定義、正規化、検証、測定有無、Notionプロパティ変換。外部通信は行いません。
+- `workers/src/services/legacy_health_daily_service.ts`: Notionへの問い合わせ・保存と結果を担当し、既存の関数・型のimport入口も維持します。
+- `tests/legacy_health_daily_pure.test.mjs`: 明示0、空入力、睡眠時刻のみ、Shortcutの入れ子、百分率変換の契約を検証します。
 - `tests/legacy_health_daily_service.test.mjs`: 追加項目なし / 一部あり / 全部あり / 空や parse 不可を含むケースの検証を追加。
 - `README.md`: API キー対応表、JSON 例、Notion 列追加手順、migration note を追記。
 
