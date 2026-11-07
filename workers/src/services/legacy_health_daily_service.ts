@@ -349,8 +349,10 @@ export const buildHealthPartialProps = (
 ): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
 
-  for (const { payloadKey, notionProp, scalePercent } of NUMERIC_FIELDS) {
-    assignNumberProp(props, notionProp, payload[payloadKey], { scalePercent });
+  for (const field of NUMERIC_FIELDS) {
+    assignNumberProp(props, field.notionProp, payload[field.payloadKey], {
+      scalePercent: "scalePercent" in field ? field.scalePercent : false,
+    });
   }
 
   for (const { payloadKey, notionProp } of DATE_FIELDS) {
@@ -385,7 +387,8 @@ const buildNotionPropertyErrorContext = (
 ) => ({
   operation,
   propertyNames,
-  payload,
+  // Keep field names for diagnosis; never log personal measurement values.
+  submittedFields: Object.keys(payload),
 });
 
 const logNotionPropertyError = (
@@ -395,7 +398,7 @@ const logNotionPropertyError = (
   console.error("HEALTH_DAILY_NOTION_PROPERTY_ERROR", {
     ...context,
     status: result.status,
-    detailPreview: result.text.slice(0, 500),
+    errorCode: "notion_property_error",
   });
 };
 
